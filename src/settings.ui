@@ -1,0 +1,244 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>setting</class>
+ <widget class="QMainWindow" name="setting">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>450</width>
+    <height>250</height>
+   </rect>
+  </property>
+  <property name="sizePolicy">
+   <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+    <horstretch>0</horstretch>
+    <verstretch>0</verstretch>
+   </sizepolicy>
+  </property>
+  <property name="minimumSize">
+   <size>
+    <width>450</width>
+    <height>250</height>
+   </size>
+  </property>
+  <property name="maximumSize">
+   <size>
+    <width>450</width>
+    <height>250</height>
+   </size>
+  </property>
+  <property name="windowTitle">
+   <string>设置</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <property name="enabled">
+    <bool>true</bool>
+   </property>
+   <widget class="QLineEdit" name="clientEdit">
+    <property name="geometry">
+     <rect>
+      <x>90</x>
+      <y>20</y>
+      <width>261</width>
+      <height>21</height>
+     </rect>
+    </property>
+    <property name="toolTip">
+     <string>在这里输入你所使用的Telegram客户端名称</string>
+    </property>
+    <property name="placeholderText">
+     <string>请输入客户端的名称</string>
+    </property>
+    <property name="clearButtonEnabled">
+     <bool>false</bool>
+    </property>
+   </widget>
+   <widget class="QLabel" name="client">
+    <property name="geometry">
+     <rect>
+      <x>20</x>
+      <y>20</y>
+      <width>54</width>
+      <height>16</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>客户端</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="clientbtn">
+    <property name="geometry">
+     <rect>
+      <x>360</x>
+      <y>20</y>
+      <width>75</width>
+      <height>24</height>
+     </rect>
+    </property>
+    <property name="toolTip">
+     <string>自动获取客户端名称</string>
+    </property>
+    <property name="text">
+     <string>自动获取</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="pathBtn">
+    <property name="geometry">
+     <rect>
+      <x>360</x>
+      <y>50</y>
+      <width>75</width>
+      <height>24</height>
+     </rect>
+    </property>
+    <property name="toolTip">
+     <string>自动获取客户端路径</string>
+    </property>
+    <property name="text">
+     <string>自动获取</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="path">
+    <property name="geometry">
+     <rect>
+      <x>20</x>
+      <y>50</y>
+      <width>54</width>
+      <height>16</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>路径</string>
+    </property>
+   </widget>
+   <widget class="QLineEdit" name="pathEdit">
+    <property name="geometry">
+     <rect>
+      <x>90</x>
+      <y>50</y>
+      <width>261</width>
+      <height>21</height>
+     </rect>
+    </property>
+    <property name="toolTip">
+     <string>在这里输入你所使用的Telegram客户端路径</string>
+    </property>
+    <property name="placeholderText">
+     <string>请输入客户端路径</string>
+    </property>
+    <property name="clearButtonEnabled">
+     <bool>false</bool>
+    </property>
+   </widget>
+   <widget class="QLineEdit" name="defaultTdataEdit">
+    <property name="geometry">
+     <rect>
+      <x>90</x>
+      <y>80</y>
+      <width>261</width>
+      <height>21</height>
+     </rect>
+    </property>
+    <property name="toolTip">
+     <string>在这里输入默认登录的账户标签</string>
+    </property>
+    <property name="placeholderText">
+     <string>请输入默认账户标签</string>
+    </property>
+    <property name="clearButtonEnabled">
+     <bool>false</bool>
+    </property>
+   </widget>
+   <widget class="QLabel" name="defaultTdata">
+    <property name="geometry">
+     <rect>
+      <x>20</x>
+      <y>80</y>
+      <width>54</width>
+      <height>16</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>默认tdata</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="args">
+    <property name="geometry">
+     <rect>
+      <x>20</x>
+      <y>110</y>
+      <width>54</width>
+      <height>16</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>参数</string>
+    </property>
+   </widget>
+   <widget class="QListWidget" name="argsWidget">
+    <property name="geometry">
+     <rect>
+      <x>90</x>
+      <y>110</y>
+      <width>261</width>
+      <height>131</height>
+     </rect>
+    </property>
+    <property name="toolTip">
+     <string>在这里添加备用登录的账户标签</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="addBtn">
+    <property name="geometry">
+     <rect>
+      <x>360</x>
+      <y>110</y>
+      <width>75</width>
+      <height>24</height>
+     </rect>
+    </property>
+    <property name="toolTip">
+     <string>添加参数</string>
+    </property>
+    <property name="text">
+     <string>添加</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="delBtn">
+    <property name="geometry">
+     <rect>
+      <x>360</x>
+      <y>140</y>
+      <width>75</width>
+      <height>24</height>
+     </rect>
+    </property>
+    <property name="toolTip">
+     <string>删除参数</string>
+    </property>
+    <property name="text">
+     <string>删除</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="finishBtn">
+    <property name="geometry">
+     <rect>
+      <x>360</x>
+      <y>215</y>
+      <width>75</width>
+      <height>24</height>
+     </rect>
+    </property>
+    <property name="toolTip">
+     <string>保存配置</string>
+    </property>
+    <property name="text">
+     <string>保存</string>
+    </property>
+   </widget>
+  </widget>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
