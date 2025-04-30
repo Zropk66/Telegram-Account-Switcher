@@ -64,21 +64,27 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
     steps:
       - name: Download Artifact
         uses: actions/download-artifact@v4
         with:
-          pattern: ${{ needs.build.outputs.OUTPUT_NAME }}
-          path: release
+          path: ./
+          name: ${{ needs.build.outputs.output_name }}
+
+      - name: Verify Files
+        run: |
+          ls -R
+          if [[ ! -f "./${{ needs.build.outputs.output_name }}" ]]; then
+            echo "::error::Artifact not found!"
+            exit 1
+          fi
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
+          files: ./${{ needs.build.outputs.output_name }}
           tag_name: v${{ env.VERSION }}
-          name: "TAS ${{ env.VERSION }}"
-          files: |
-            release/*
           draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
