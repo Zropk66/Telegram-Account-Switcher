@@ -19,6 +19,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          architecture: ${{ env.BUILD_ARCH }}
+
       - name: Extract Version
         id: version
         shell: powershell
@@ -27,12 +33,6 @@ jobs:
           $VERSION = python -c "import sys, os, ast; sys.path.insert(0, os.path.join(os.getcwd(), 'src')); from main import VERSION; print(VERSION)"
           echo "VERSION=$VERSION" >> $env:GITHUB_ENV
           Write-Output "Extracted Version: $VERSION"
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-          architecture: ${{ env.BUILD_ARCH }}
 
       - name: Generate Output Name
         run: |
