@@ -73,8 +73,7 @@ jobs:
       - name: Compile with Nuitka
         env:
           CC: 'C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin\gcc.exe'
-        run: |
-          python -m nuitka --mingw64 --show-progress --show-memory --standalone --onefile --windows-console-mode=disable --plugin-enable=pyside6 --output-dir=output --remove-output --lto=yes --jobs=8 .\launcher.py
+        run: echo "Y" | python -m nuitka --mingw64 --show-progress --show-memory --standalone --onefile --windows-console-mode=disable --plugin-enable=pyside6 --output-dir=output --remove-output --lto=yes --jobs=8 .\launcher.py
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
