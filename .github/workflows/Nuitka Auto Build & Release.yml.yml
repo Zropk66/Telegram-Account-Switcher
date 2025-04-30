@@ -14,7 +14,7 @@ jobs:
     runs-on: windows-latest
 
     outputs:
-      output_name: ${{ steps.set-output.outputs.result }}
+      output_name: ${{ steps.generate-output.outputs.result }}
 
     steps:
       - name: Checkout code
@@ -34,7 +34,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Generate Output Name
-        id: set-output
+        id: generate-output
         shell: powershell
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -53,7 +53,7 @@ jobs:
           Write-Output "Generate Output Name: $OUTPUT_NAME"
           
           echo "OUTPUT_NAME=$OUTPUT_NAME" >> $env:GITHUB_ENV
-          echo "output_name=$OUTPUT_NAME" >> $GITHUB_OUTPUT
+          echo "result=$OUTPUT_NAME" >> $env:GITHUB_OUTPUT
 
       - name: Compile with Nuitka
         run: |
@@ -73,17 +73,18 @@ jobs:
       contents: write
       actions: read
       id-token: write
+      packages: write
     steps:
       - name: Download Artifact
         uses: actions/download-artifact@v4
         with:
-          path: ./artifacts
+          path: ./artifacts/dist
           name: ${{ needs.build.outputs.output_name }}
 
       - name: Verify Files
         run: |
-          if [[ ! -f "./artifacts/${{ needs.build.outputs.output_name }}" ]]; then
-            echo "::error::Missing artifact: ${{ needs.build.outputs.output_name }}"
+          if [[ ! -f "./artifacts/dist/${{ needs.build.outputs.output_name }}" ]]; then
+            echo "::error::Artifact path: ./artifacts/dist/${{ needs.build.outputs.output_name }}"
             ls -R ./artifacts
             exit 1
           fi
