@@ -20,7 +20,7 @@ from src.utils.process_utils import handle_process, system_exit
 from src.utils.system import ctrl_handler, handle_global_exception
 
 TITLE = 'TAS'
-VERSION = '1.0'
+VERSION = '1.0.0'
 WORK_PATH = os.getcwd()
 logger = logger
 CLIENT = 'Telegram.exe'

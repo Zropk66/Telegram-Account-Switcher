@@ -7,7 +7,7 @@ on:
 
 env:
   BUILD_ARCH: 'x64'
-  OS_ENV: 'Windows_x64'  # 其他环境可改为 Linux_x64 等
+  OS_ENV: 'Windows_x64'
 
 jobs:
   build:
@@ -15,6 +15,7 @@ jobs:
 
     outputs:
       output_name: ${{ steps.generate-output.outputs.result }}
+      version: ${{ steps.generate-output.outputs.version }}
 
     steps:
       - name: Checkout code
@@ -25,7 +26,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.12'
           architecture: ${{ env.BUILD_ARCH }}
 
       - name: Install Dependencies
@@ -54,6 +55,7 @@ jobs:
           
           echo "OUTPUT_NAME=$OUTPUT_NAME" >> $env:GITHUB_ENV
           echo "result=$OUTPUT_NAME" >> $env:GITHUB_OUTPUT
+          echo "version=$VERSION" >> $env:GITHUB_OUTPUT
 
       - name: Compile with Nuitka
         run: |
@@ -72,7 +74,6 @@ jobs:
     permissions:
       contents: write
       actions: read
-      id-token: write
       packages: write
     steps:
       - name: Download Artifact
@@ -81,17 +82,11 @@ jobs:
           name: ${{ needs.build.outputs.artifact_name }}
           path: ./artifacts
 
-      - name: Verify Files
-        run: |
-          if [[ ! -f "./artifacts/${{ needs.build.outputs.output_name }}" ]]; then
-            echo "::error::Artifact path: ./artifacts/${{ needs.build.outputs.output_name }}"
-            ls -R ./artifacts
-            exit 1
-          fi
-
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: ./${{ needs.build.outputs.output_name }}
-          tag_name: v${{ env.VERSION }}
+          files: ./artifacts/${{ needs.build.outputs.output_name }}
+          name: ${{ needs.build.outputs.output_name }}
+          tag_name: v${{ needs.build.outputs.version }}
           draft: false
+          prerelease: false
