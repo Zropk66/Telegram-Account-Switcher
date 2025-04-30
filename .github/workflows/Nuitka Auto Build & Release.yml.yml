@@ -48,7 +48,7 @@ jobs:
         with:
           name: ${{ env.OUTPUT_NAME }}
           path: dist/${{ env.OUTPUT_NAME }}
-          retention-days: 3
+          retention-days: 7
 
   release:
     needs: build
@@ -57,7 +57,7 @@ jobs:
       - name: Download Artifact
         uses: actions/download-artifact@v4
         with:
-          pattern: TAS-*
+          pattern: ${{ needs.build.outputs.OUTPUT_NAME }}
           path: release
 
       - name: Create Release
