@@ -39,23 +39,6 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           architecture: ${{ env.BUILD_ARCH }}
 
-      - name: Install Build Tools
-        shell: powershell
-        run: |
-          # 安装 MinGW
-          choco install -y mingw --version=13.1.0 --force
-          
-          # 获取系统环境变量并追加 MinGW 路径
-          $currentPath = [Environment]::GetEnvironmentVariable('PATH', 'Machine')
-          $mingwPath = 'C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin'
-          
-          if (-not $currentPath.Contains($mingwPath)) {
-            [Environment]::SetEnvironmentVariable('PATH', "$currentPath;$mingwPath", 'Machine')
-          }
-          
-          # 验证路径添加
-          Write-Output "Current PATH: $env:PATH"
-
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
