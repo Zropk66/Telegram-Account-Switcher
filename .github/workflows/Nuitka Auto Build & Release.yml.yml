@@ -46,7 +46,7 @@ jobs:
             Write-Error "ERROR: $_"
             exit 1
           }
-          $OUTPUT_NAME = "TAS_${VERSION}_$($env:OS_ENV)_Py${PY_VER}.exe"
+          $OUTPUT_NAME = "TAS_V${VERSION}_$($env:OS_ENV)_Py${PY_VER}.exe"
 
           Write-Output "Python Version: $PY_VER"
           Write-Output "TAS Version: $VERSION"
@@ -63,7 +63,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.OUTPUT_NAME }}
-          path: dist/${{ env.OUTPUT_NAME }}
+          path: output/${{ env.OUTPUT_NAME }}
           retention-days: 7
 
   release:
@@ -78,13 +78,13 @@ jobs:
       - name: Download Artifact
         uses: actions/download-artifact@v4
         with:
-          path: ./artifacts/dist
-          name: ${{ needs.build.outputs.output_name }}
+          name: ${{ needs.build.outputs.artifact_name }}
+          path: ./artifacts
 
       - name: Verify Files
         run: |
-          if [[ ! -f "./artifacts/dist/${{ needs.build.outputs.output_name }}" ]]; then
-            echo "::error::Artifact path: ./artifacts/dist/${{ needs.build.outputs.output_name }}"
+          if [[ ! -f "./artifacts/${{ needs.build.outputs.output_name }}" ]]; then
+            echo "::error::Artifact path: ./artifacts/${{ needs.build.outputs.output_name }}"
             ls -R ./artifacts
             exit 1
           fi
