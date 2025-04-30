@@ -53,10 +53,10 @@ jobs:
 
           $OUTPUT_NAME = "TAS-$($env:VERSION)_$($env:OS_ENV)_${PY_VER}.exe"
 
-          Write-Output "版本: $PY_VER"
-          Write-Output "生成文件名: $OUTPUT_NAME"
-
-          "OUTPUT_NAME=$OUTPUT_NAME"
+          Write-Output "Python Version: $PY_VER"
+          Write-Output "Generate Output Name: $OUTPUT_NAME"
+          
+          echo "OUTPUT_NAME=$OUTPUT_NAME" >> $env:GITHUB_ENV
 
       - name: Compile with Nuitka
         run: |
