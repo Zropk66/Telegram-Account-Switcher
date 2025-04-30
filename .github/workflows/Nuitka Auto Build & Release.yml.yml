@@ -47,9 +47,9 @@ jobs:
 
           # 提取Python版本（添加异常捕获）
           try {
-            $PY_VER = python -c "import sys; print(f'py{sys.version_info.major}{sys.version_info.minor}')"
+            $PY_VER = python -c "from src.main import VERSION;print(VERSION)"
           } catch {
-            Write-Error "Python版本提取失败: $_"
+            Write-Error "ERROR: $_"
             exit 1
           }
 
@@ -57,10 +57,9 @@ jobs:
           $OUTPUT_NAME = "TAS-$($env:VERSION)_$($env:OS_ENV)_${PY_VER}.exe"
 
           # 调试输出
-          Write-Output "Python版本: $PY_VER"
+          Write-Output "版本: $PY_VER"
           Write-Output "生成文件名: $OUTPUT_NAME"
 
-          # 写入环境变量（兼容特殊字符）
           "OUTPUT_NAME=$OUTPUT_NAME" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Compile with Nuitka
