@@ -30,15 +30,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Extract Version
-        id: version
-        shell: powershell
-        run: |
-          # 使用绝对路径确保模块导入
-          $VERSION = python -c "import sys, os, ast; sys.path.insert(0, os.path.join(os.getcwd(), 'src')); from main import VERSION; print(VERSION)"
-          echo "VERSION=$VERSION" >> $env:GITHUB_ENV
-          Write-Output "Extracted Version: $VERSION"
-
       - name: Generate Output Name
         shell: powershell
         run: |
@@ -50,10 +41,11 @@ jobs:
             Write-Error "ERROR: $_"
             exit 1
           }
-
-          $OUTPUT_NAME = "TAS-$($env:VERSION)_$($env:OS_ENV)_${PY_VER}.exe"
+          $VERSION = python -c "import sys, os, ast; sys.path.insert(0, os.path.join(os.getcwd(), 'src')); from main import VERSION; print(VERSION)"
+          $OUTPUT_NAME = "TAS-$(VERSION)_$($env:OS_ENV)_${PY_VER}.exe"
 
           Write-Output "Python Version: $PY_VER"
+          Write-Output "TAS Version: $VERSION"
           Write-Output "Generate Output Name: $OUTPUT_NAME"
           
           echo "OUTPUT_NAME=$OUTPUT_NAME" >> $env:GITHUB_ENV
