@@ -42,14 +42,26 @@ jobs:
       - name: Generate Output Name
         shell: powershell
         run: |
-          # 使用PowerShell语法提取Python版本
-          $PY_VER = python -c "import sys; print(f'py{sys.version_info.major}{sys.version_info.minor}')"
-          Write-Output "Python版本: $PY_VER"
+          # 修正中文乱码并统一编码
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-          # 组合文件名并写入环境变量
-          $OUTPUT_NAME = "TAS-$env:VERSION_$env:OS_ENV_${PY_VER}.exe"
-          echo "OUTPUT_NAME=$OUTPUT_NAME" >> $env:GITHUB_ENV
+          # 提取Python版本（添加异常捕获）
+          try {
+            $PY_VER = python -c "import sys; print(f'py{sys.version_info.major}{sys.version_info.minor}')"
+          } catch {
+            Write-Error "Python版本提取失败: $_"
+            exit 1
+          }
+
+          # 变量拼接标准化
+          $OUTPUT_NAME = "TAS-$($env:VERSION)_$($env:OS_ENV)_${PY_VER}.exe"
+
+          # 调试输出
+          Write-Output "Python版本: $PY_VER"
           Write-Output "生成文件名: $OUTPUT_NAME"
+
+          # 写入环境变量（兼容特殊字符）
+          "OUTPUT_NAME=$OUTPUT_NAME" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Compile with Nuitka
         run: |
