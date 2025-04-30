@@ -79,14 +79,14 @@ jobs:
       - name: Download Artifact
         uses: actions/download-artifact@v4
         with:
-          name: ${{ needs.build.outputs.artifact_name }}
+          name: ${{ needs.build.outputs.output_name }}
           path: ./artifacts
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           files: ./artifacts/${{ needs.build.outputs.output_name }}
-          name: ${{ needs.build.outputs.output_name }}
+          name: ${{ needs.build.outputs.version }}
           tag_name: v${{ needs.build.outputs.version }}
           draft: false
           prerelease: false
