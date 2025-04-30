@@ -4,7 +4,6 @@ import traceback
 
 import psutil
 
-from src.utils.files_utils import config_helper
 from src.utils.logger import logger
 
 
@@ -55,6 +54,7 @@ def handle_process(client, mode: str = 'isRun'):
 
 def system_exit(message=None, restore=False):
     """退出程序"""
+    from src.utils.files_utils import config_helper
     client = config_helper(field='client', mode='r')
     handle_process(client=client, mode='kill')
     if restore:

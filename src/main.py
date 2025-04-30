@@ -19,7 +19,6 @@ from src.utils.logger import logger
 from src.utils.process_utils import handle_process, system_exit
 from src.utils.system import ctrl_handler, handle_global_exception
 
-__version__ = 1.0
 TITLE = 'TAS'
 VERSION = '1.0'
 WORK_PATH = os.getcwd()
@@ -179,10 +178,12 @@ def check_arg():
                 return ''
 
             if argument.lower() == 'help':
-                logger.tips("--help -> 帮助文档\n--setting -> 打开设置\n--login -> 登录指定标签的账号")
+                logger.tips("--version -> 获取版本\n--help -> 帮助文档\n--setting -> 打开设置\n--login -> 登录指定标签的账号")
+                sys.exit()
+            elif argument.lower() == 'version':
+                logger.tips(f'当前版本: {VERSION}')
                 sys.exit()
             elif argument.lower() == 'settings':
-                logger.info('打开设置.')
                 start_setting_window()
                 sys.exit()
             elif argument.lower() == 'login':
