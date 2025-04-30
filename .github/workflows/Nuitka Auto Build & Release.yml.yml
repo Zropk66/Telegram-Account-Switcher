@@ -21,11 +21,12 @@ jobs:
 
       - name: Extract Version
         id: version
+        shell: powershell
         run: |
-          # 从 src/main.py 提取 VERSION 变量
-          VERSION=$(python -c "import sys, ast; sys.path.insert(0, 'src'); from main import VERSION; print(VERSION)")
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "Version extracted: $VERSION"
+          # 使用绝对路径确保模块导入
+          $VERSION = python -c "import sys, os, ast; sys.path.insert(0, os.path.join(os.getcwd(), 'src')); from main import VERSION; print(VERSION)"
+          echo "VERSION=$VERSION" >> $env:GITHUB_ENV
+          Write-Output "Extracted Version: $VERSION"
 
       - name: Setup Python
         uses: actions/setup-python@v5
