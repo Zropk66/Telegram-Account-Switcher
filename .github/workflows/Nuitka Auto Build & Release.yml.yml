@@ -42,10 +42,8 @@ jobs:
       - name: Generate Output Name
         shell: powershell
         run: |
-          # 修正中文乱码并统一编码
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-          # 提取Python版本（添加异常捕获）
           try {
             $PY_VER = python -c "from src.main import VERSION;print(VERSION)"
           } catch {
@@ -53,14 +51,12 @@ jobs:
             exit 1
           }
 
-          # 变量拼接标准化
           $OUTPUT_NAME = "TAS-$($env:VERSION)_$($env:OS_ENV)_${PY_VER}.exe"
 
-          # 调试输出
           Write-Output "版本: $PY_VER"
           Write-Output "生成文件名: $OUTPUT_NAME"
 
-          "OUTPUT_NAME=$OUTPUT_NAME" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "OUTPUT_NAME=$OUTPUT_NAME"
 
       - name: Compile with Nuitka
         run: |
