@@ -21,7 +21,7 @@ from src.utils.system_utils import handle_global_exception, bind_singleton
 
 logger = logger
 TITLE = 'TAS'
-VERSION = '1.1.0'
+VERSION = '1.1.1'
 WORK_PATH = os.getcwd()
 
 CONFIG_FILE = 'configs.json'
@@ -42,18 +42,15 @@ def tdata_process():
     """判断 tdata 状态并执行相关操作"""
     try:
         tag = CONFIG.get('tag')
-        if not tag:
-            not_tag()
-            logger.info('客户端启动.')
-            safe_exit()
-
-        if asyncio.run(async_wait_process_is_run(tag)) is False:
+        if asyncio.run(__tdata_process(tag)) is False:
             logger.error('客户端启动超时.')
             safe_exit()
         logger.info('客户端启动成功, 运行状况持续受到监控.')
 
-        while check_process_alive(CONFIG.get('client')):
-            pass
+        while True:
+            alive = check_process_alive(CONFIG.get('client'))
+            if alive is False:
+                break
 
         safe_exit(restore=True)
     except Exception:
@@ -61,14 +58,35 @@ def tdata_process():
         safe_exit(restore=True)
 
 
-async def async_wait_process_is_run(tag):
+async def __tdata_process(tag):
+    """异步检查客户端是否启动"""
     for i in range(30):
-        if has_tag(tag):
-            return True
+        if tag == CONFIG.get('default') or tag == '':
+            if is_exists(os.path.join(CONFIG.get('path'), 'tdata'), CONFIG.get('default')):
+                run_command()
+            else:
+                if modify_file('restore'):
+                    run_command()
+            logger.info('客户端启动.')
+            safe_exit()
+
+        atexit.register(restore_file)
+        startup_successful = False
+        if is_exists(os.path.join(CONFIG.get('path'), 'tdata'), tag):
+            run_command()
+            startup_successful = True
+        else:
+            if modify_file('modify'):
+                run_command()
+                startup_successful = True
+            else:
+                safe_exit(restore=True)
+        return startup_successful
     return False
 
 
 def run_command():
+    """启动目标程序"""
     client_path = os.path.join(CONFIG.get('path'), CONFIG.get('client'))
     try:
         proc = subprocess.Popen(
@@ -90,32 +108,8 @@ def run_command():
         logger.error(f"启动异常: {str(e)}")
     return None
 
-
-def not_tag():
-    if is_exists(os.path.join(CONFIG.get('path'), 'tdata'), CONFIG.get('default')):
-        run_command()
-    else:
-        if modify_file('restore'):
-            run_command()
-
-
-def has_tag(tag) -> bool:
-    atexit.register(restore_file)
-    startup_successful = False
-    if is_exists(os.path.join(CONFIG.get('path'), 'tdata'), tag):
-        run_command()
-        startup_successful = True
-    else:
-        if modify_file('modify'):
-            run_command()
-            startup_successful = True
-        else:
-            safe_exit(restore=True)
-    return startup_successful
-
-
 def check_client(client):
-    """检查客户端是否正确"""
+    """检查客户端"""
     path = CONFIG.get('path')
     if os.path.isfile(os.path.join(path, client)):
         return True
@@ -124,7 +118,7 @@ def check_client(client):
 
 
 def check_path(path):
-    """检查路径是否正确"""
+    """检查路径"""
     if os.path.isdir(path):
         return True
     logger.warning('路径格式不正确.')
@@ -132,7 +126,7 @@ def check_path(path):
 
 
 def check_default_tdata(default_tdata):
-    """检查默认登录账户"""
+    """检查默认标签"""
     if default_tdata == '':
         logger.warning('未设置默认 Tdata.')
         return False
@@ -143,10 +137,11 @@ def check_default_tdata(default_tdata):
 
 
 def parse_arguments() -> argparse.Namespace:
-    """使用标准库实现参数解析"""
+    """参数解析"""
     parser = argparse.ArgumentParser(
         description='应用参数解析器',
-        add_help=False
+        add_help=False,
+        exit_on_error=False
     )
 
     group = parser.add_mutually_exclusive_group()
@@ -164,43 +159,41 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('--help',
                         action='store_true',
                         help='显示帮助文档')
-
     return parser.parse_args()
 
 
 def check_argument() -> Optional[str]:
-    """重构后的参数处理方法"""
+    """参数处理方法"""
     try:
         args = parse_arguments()
+    except argparse.ArgumentError:
+        return CONFIG.get('default')
 
-        if args.help:
-            logger.tips("--version -> 获取版本\n"
-                        "--help -> 帮助文档\n"
-                        "--setting -> 打开设置\n"
-                        "--login -> 登录指定标签的账号\n")
-            sys.exit()
+    if args.help:
+        logger.tips("--version -> 获取版本\n"
+                    "--help -> 帮助文档\n"
+                    "--setting -> 打开设置\n"
+                    "--login -> 登录指定标签的账号\n")
+        sys.exit()
 
-        if args.version:
-            logger.tips(f'{TITLE} v{VERSION}')
-            sys.exit()
+    if args.version:
+        logger.tips(f'{TITLE} v{VERSION}')
+        sys.exit()
 
-        if args.settings:
-            open_setting_window()
-            sys.exit()
+    if args.settings:
+        open_setting_window()
+        sys.exit()
 
-        if args.login:
-            return validate_login_tag(args.login)
-
-        return None
-
-    except argparse.ArgumentError as e:
-        logger.error(f"参数解析错误: {str(e)}")
-        sys.exit(1)
+    if args.login:
+        return validate_login_tag(args.login)
+    return None
 
 
 def validate_login_tag(tag: str) -> str:
     """验证登录标签"""
     tags = CONFIG.get('tags')
+    if tag == CONFIG.get('default'):
+        return tag
 
     if tag not in tags:
         logger.warning(f"未注册的标签: {tag}")
@@ -211,7 +204,7 @@ def validate_login_tag(tag: str) -> str:
         return CONFIG.get('default')
     return tag
 
-def check():
+def check_configs():
     if check_client(CONFIG.get('client')) is False:
         logger.tips('客户端检查失败.')
         return False
@@ -237,7 +230,7 @@ def initialize():
         open_setting_window()
     else:
         try:
-            if check() is False:
+            if check_configs() is False:
                 open_setting_window()
                 sys.exit()
         except Exception as e:
