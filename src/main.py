@@ -21,7 +21,7 @@ from src.utils.system_utils import handle_global_exception, bind_singleton
 
 logger = logger
 TITLE = 'TAS'
-VERSION = '1.1.1'
+VERSION = '1.1.0'
 WORK_PATH = os.getcwd()
 
 CONFIG_FILE = 'configs.json'
@@ -79,10 +79,10 @@ def run_command():
             shell=True,
             start_new_session=True
         )
-
-        while not check_process_alive(CONFIG.get('client')):
-            pass
-
+        while True:
+            alive = check_process_alive(CONFIG.get('client'))
+            if alive:
+                break
         return proc
     except FileNotFoundError:
         logger.error(f"客户端路径不存在: {client_path}")

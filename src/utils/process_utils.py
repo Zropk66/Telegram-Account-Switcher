@@ -67,10 +67,11 @@ def get_process_path(client: str):
     return None
 
 
-def safe_exit(message=None, restore=False):
+def safe_exit(message=None, restore=False, kill_process=False):
     """退出程序"""
     client = config_manager().get('client')
-    try_kill_process(client)
+    if kill_process:
+        try_kill_process(client)
     if restore:
         from src.utils.files_utils import modify_file
         modify_file('restore')
