@@ -35,7 +35,7 @@
    <property name="enabled">
     <bool>true</bool>
    </property>
-   <widget class="QLineEdit" name="clientEdit">
+   <widget class="QLineEdit" name="client_edit">
     <property name="geometry">
      <rect>
       <x>90</x>
@@ -54,7 +54,7 @@
      <bool>false</bool>
     </property>
    </widget>
-   <widget class="QLabel" name="client">
+   <widget class="QLabel" name="client_label">
     <property name="geometry">
      <rect>
       <x>20</x>
@@ -67,7 +67,7 @@
      <string>客户端</string>
     </property>
    </widget>
-   <widget class="QPushButton" name="clientbtn">
+   <widget class="QPushButton" name="client_button">
     <property name="geometry">
      <rect>
       <x>360</x>
@@ -83,7 +83,7 @@
      <string>自动获取</string>
     </property>
    </widget>
-   <widget class="QPushButton" name="pathBtn">
+   <widget class="QPushButton" name="path_button">
     <property name="geometry">
      <rect>
       <x>360</x>
@@ -99,7 +99,7 @@
      <string>自动获取</string>
     </property>
    </widget>
-   <widget class="QLabel" name="path">
+   <widget class="QLabel" name="path_label">
     <property name="geometry">
      <rect>
       <x>20</x>
@@ -112,7 +112,7 @@
      <string>路径</string>
     </property>
    </widget>
-   <widget class="QLineEdit" name="pathEdit">
+   <widget class="QLineEdit" name="path_edit">
     <property name="geometry">
      <rect>
       <x>90</x>
@@ -131,7 +131,7 @@
      <bool>false</bool>
     </property>
    </widget>
-   <widget class="QLineEdit" name="defaultTdataEdit">
+   <widget class="QLineEdit" name="default_edit">
     <property name="geometry">
      <rect>
       <x>90</x>
@@ -150,7 +150,7 @@
      <bool>false</bool>
     </property>
    </widget>
-   <widget class="QLabel" name="defaultTdata">
+   <widget class="QLabel" name="default_label">
     <property name="geometry">
      <rect>
       <x>20</x>
@@ -160,10 +160,10 @@
      </rect>
     </property>
     <property name="text">
-     <string>默认tdata</string>
+     <string>默认</string>
     </property>
    </widget>
-   <widget class="QLabel" name="args">
+   <widget class="QLabel" name="tags_label">
     <property name="geometry">
      <rect>
       <x>20</x>
@@ -176,7 +176,7 @@
      <string>参数</string>
     </property>
    </widget>
-   <widget class="QListWidget" name="argsWidget">
+   <widget class="QListWidget" name="tags_widget">
     <property name="geometry">
      <rect>
       <x>90</x>
@@ -189,7 +189,7 @@
      <string>在这里添加备用登录的账户标签</string>
     </property>
    </widget>
-   <widget class="QPushButton" name="addBtn">
+   <widget class="QPushButton" name="add_button">
     <property name="geometry">
      <rect>
       <x>360</x>
@@ -205,7 +205,7 @@
      <string>添加</string>
     </property>
    </widget>
-   <widget class="QPushButton" name="delBtn">
+   <widget class="QPushButton" name="del_button">
     <property name="geometry">
      <rect>
       <x>360</x>
@@ -221,7 +221,7 @@
      <string>删除</string>
     </property>
    </widget>
-   <widget class="QPushButton" name="finishBtn">
+   <widget class="QPushButton" name="finish_button">
     <property name="geometry">
      <rect>
       <x>360</x>

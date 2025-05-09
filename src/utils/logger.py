@@ -1,5 +1,7 @@
+# -*- coding: utf-8 -*-
+# @Time : 2025/5/7 13:12
+# @Author : Zropk
 import logging
-import os
 import sys
 import traceback
 
@@ -22,12 +24,13 @@ def format_exception(exception):
 
 
 class popup_filter(logging.Filter):
+    """过滤器"""
     def filter(self, record):
         is_show = record.levelno in {logging.TIPS, logging.CRITICAL}
         if is_show:
             try:
                 if isinstance(record.msg, BaseException):
-                    message = f"捕获的未处理异常:\n{format_exception(record.msg)}"
+                    message = format_exception(record.msg)
                 else:
                     message = record.msg
 
@@ -49,6 +52,7 @@ class popup_filter(logging.Filter):
 
 
 class AppLogger:
+    """初始化"""
     _instance = None
 
     def __new__(cls):
@@ -61,7 +65,6 @@ class AppLogger:
         self.logger = logging.getLogger('TAS_logger')
         self.logger.setLevel(logging.DEBUG)
 
-        # 自定义 TIPS 级别
         TIPS_LEVEL_NUM = 25
         logging.addLevelName(TIPS_LEVEL_NUM, "TIPS")
         setattr(logging, 'TIPS', TIPS_LEVEL_NUM)
@@ -69,7 +72,6 @@ class AppLogger:
                 lambda self, msg, *args, **kwargs:
                 self._log(TIPS_LEVEL_NUM, msg, args, **kwargs))
 
-        # 处理器配置
         formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
         console_handler = logging.StreamHandler()
         file_handler = logging.FileHandler("TAS_log.txt", mode='a', encoding='utf-8')
@@ -77,7 +79,6 @@ class AppLogger:
         console_handler.setFormatter(formatter)
         file_handler.setFormatter(formatter)
 
-        # 添加过滤器和处理器
         self.logger.addFilter(popup_filter())
         self.logger.addHandler(console_handler)
         self.logger.addHandler(file_handler)
