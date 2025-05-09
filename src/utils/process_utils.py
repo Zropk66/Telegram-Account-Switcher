@@ -1,17 +1,16 @@
 # -*- coding: utf-8 -*-
 # @Time : 2025/5/7 13:12
 # @Author : Zropk
-import asyncio
 import atexit
 import os
 
 import psutil
 
-from src.utils.logger import logger
 from src.utils.files_utils import config_manager
+from src.utils.logger import logger
 
 
-def check_process_is_run(client: str):
+def check_process_alive(client: str):
     if not isinstance(client, str):
         raise TypeError("'client' must be 'str'")
     for process in psutil.process_iter(attrs=['name']):
@@ -20,49 +19,6 @@ def check_process_is_run(client: str):
                 return True
         except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
             logger.error(e)
-    return False
-
-
-async def async_check_process_is_run(
-        client: str,
-        max_retries: int = 5,
-        base_delay: float = 0.5,
-        timeout: float = 30.0
-) -> bool:
-    """
-    异步进程检测
-
-    :param client: 进程名称
-    :param max_retries: 最大重试次数
-    :param base_delay: 基础等待间隔
-    :param timeout: 总超时时间
-    :return: 进程是否存活
-    """
-    start_time = asyncio.get_event_loop().time()
-
-    async def _check_once() -> bool:
-        """单次检测封装"""
-        try:
-            return check_process_is_run(client)
-        except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
-            logger.debug(f"进程检测异常: {str(e)}")
-            return False
-
-    for attempt in range(max_retries):
-        delay = base_delay * (2 ** attempt)
-        deadline = start_time + timeout
-
-        try:
-            return await asyncio.wait_for(
-                _check_once(),
-                timeout=min(delay, deadline - asyncio.get_event_loop().time())
-            )
-        except asyncio.TimeoutError:
-            if asyncio.get_event_loop().time() > deadline:
-                logger.warning(f"进程检测超时: {client}")
-                return False
-            continue
-
     return False
 
 

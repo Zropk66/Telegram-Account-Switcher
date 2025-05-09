@@ -8,8 +8,6 @@ import os
 import os.path
 import subprocess
 import sys
-import time
-from pathlib import Path
 from typing import Optional
 
 from PySide6.QtWidgets import QApplication
@@ -18,12 +16,12 @@ from src.ui.settings import MainWindow
 from src.utils.files_utils import search_target_file_in_directories, is_exists, restore_file, modify_file, \
     config_manager
 from src.utils.logger import logger
-from src.utils.process_utils import safe_exit, async_check_process_is_run, try_kill_process
+from src.utils.process_utils import safe_exit, try_kill_process, check_process_alive
 from src.utils.system_utils import handle_global_exception, bind_singleton
 
 logger = logger
 TITLE = 'TAS'
-VERSION = '1.1.0'
+VERSION = '1.1.1'
 WORK_PATH = os.getcwd()
 
 CONFIG_FILE = 'configs.json'
@@ -53,9 +51,10 @@ def tdata_process():
             logger.error('客户端启动超时.')
             safe_exit()
         logger.info('客户端启动成功, 运行状况持续受到监控.')
-        time.sleep(1)
 
-        asyncio.run(async_check_process_is_run(CONFIG.get('client'), 114514000, 1))
+        while check_process_alive(CONFIG.get('client')):
+            pass
+
         safe_exit(restore=True)
     except Exception:
         logger.error('参数解析失败.', exc_info=True)
@@ -70,19 +69,20 @@ async def async_wait_process_is_run(tag):
 
 
 def run_command():
-    client_path = Path(CONFIG.get('path')) / CONFIG.get('client')
+    client_path = os.path.join(CONFIG.get('path'), CONFIG.get('client'))
     try:
-        client_path = client_path.resolve(strict=True)
-
         proc = subprocess.Popen(
             [str(client_path)],
-            cwd=str(client_path.parent),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL,
             shell=True,
             start_new_session=True
         )
+
+        while not check_process_alive(CONFIG.get('client')):
+            pass
+
         return proc
     except FileNotFoundError:
         logger.error(f"客户端路径不存在: {client_path}")
@@ -211,6 +211,19 @@ def validate_login_tag(tag: str) -> str:
         return CONFIG.get('default')
     return tag
 
+def check():
+    if check_client(CONFIG.get('client')) is False:
+        logger.tips('客户端检查失败.')
+        return False
+    if check_path(CONFIG.get('path')) is False:
+        logger.tips('路径检查失败.')
+        return False
+    if check_default_tdata(CONFIG.get('default')) is False:
+        logger.tips('默认标签检查失败.')
+        return False
+    CONFIG.set('tag', check_argument())
+    return True
+
 
 def initialize():
     """初始化函数"""
@@ -224,13 +237,9 @@ def initialize():
         open_setting_window()
     else:
         try:
-            if check_client(CONFIG.get('client')) is False:
-                logger.tips('客户端检查失败.')
-            if check_path(CONFIG.get('path')) is False:
-                logger.tips('路径检查失败.')
-            if check_default_tdata(CONFIG.get('default')) is False:
-                logger.tips('默认标签检查失败.')
-            CONFIG.set('tag', check_argument())
+            if check() is False:
+                open_setting_window()
+                sys.exit()
         except Exception as e:
             logger.error('客户端初始化失败, 请检查设置是否正确.')
             logger.critical(e, exc_info=True)

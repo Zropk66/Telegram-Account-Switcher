@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QMainWindow, QMessageBox, QFileDialog, QListWidget
 
 from src.ui.ui_settings import Ui_setting
 from src.utils.logger import logger
-from src.utils.process_utils import get_process_path, async_check_process_is_run
+from src.utils.process_utils import get_process_path, check_process_alive
 from src.utils.files_utils import config_manager
 from src.utils.process_utils import try_kill_process, try_find_client
 
@@ -82,7 +82,7 @@ class MainWindow(QMainWindow):
             QDesktopServices.openUrl(QUrl("tg:"))
         except Exception as e:
             logger.error(e)
-        client_is_run = asyncio.run(async_check_process_is_run(str(self.client), 10, 1))
+        client_is_run = check_process_alive(self.client)
         if not client_is_run:
             logger.warning("无法获取到路径，您使用的telegram可能不在我们的预设池里，请手动设置.")
             return
