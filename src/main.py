@@ -18,9 +18,8 @@ from src.ui.settings import MainWindow
 from src.utils.files_utils import search_target_file_in_directories, is_exists, restore_file, modify_file, \
     config_manager
 from src.utils.logger import logger
-from src.utils.process_utils import safe_exit, check_process_is_run, async_check_process_is_run
+from src.utils.process_utils import safe_exit, async_check_process_is_run, try_kill_process
 from src.utils.system_utils import handle_global_exception, bind_singleton
-from utils.process_utils import try_kill_process
 
 logger = logger
 TITLE = 'TAS'

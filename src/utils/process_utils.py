@@ -8,6 +8,7 @@ import os
 import psutil
 
 from src.utils.logger import logger
+from src.utils.files_utils import config_manager
 
 
 def check_process_is_run(client: str):
@@ -112,8 +113,7 @@ def get_process_path(client: str):
 
 def safe_exit(message=None, restore=False):
     """退出程序"""
-    from src.utils.files_utils import config_helper
-    client = config_helper(field='client', mode='r')
+    client = config_manager().get('client')
     try_kill_process(client)
     if restore:
         from src.utils.files_utils import modify_file

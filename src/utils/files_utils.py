@@ -12,8 +12,6 @@ from typing import Any, Dict
 from pathlib import Path
 
 from src.utils.logger import logger
-from src.utils.process_utils import safe_exit
-from utils.process_utils import try_kill_process
 
 
 def search_target_file_in_directories(base_path: str, target_file: str):
@@ -42,10 +40,11 @@ def is_exists(base_path: str, target_file: str):
 
 def modify_file(mode: str, retries=0, max_retries=3):
     """修改tdata文件，实现不同账号登录"""
-    path = config_helper(field='path', mode='r')
-    default = config_helper(field='default', mode='r')
+    path = config_manager().get('path')
+    default = config_manager().get('default')
     arg = sys.argv[-1]
     if retries >= max_retries:
+        from src.utils.process_utils import safe_exit
         safe_exit()
     random_str = ''.join(random.sample('ABCDEFG', 5))
     temp = f'tdata-{random_str}'
@@ -83,80 +82,13 @@ def modify_file(mode: str, retries=0, max_retries=3):
 def restore_file():
     """程序结束时自动还原"""
     try:
-        client = config_helper(field='client', mode='r')
+        client = config_manager.get('client')
+        from src.utils.process_utils import try_kill_process
         try_kill_process(client)
         time.sleep(1)
         modify_file('restore')
     except (FileNotFoundError, PermissionError):
         logger.error('恢复帐户时出现错误.')
-
-
-def config_helper(field: str, mode: str, value=None):
-    """配置管理器"""
-    if not isinstance(field, str):
-        raise TypeError(f"字段类型应为 str，实际传入：{type(field)}")
-    if not isinstance(mode, str) or len(mode) != 1:
-        raise ValueError("模式参数格式错误")
-    if mode == 'w' and value is None:
-        raise ValueError("写入模式必须提供 value 参数")
-    try:
-        supportKey = {'client': '', 'path': '', 'tags': [], 'default': ''}
-        supportMode = {'w', 'r'}
-
-        if field == 'defaultMain':
-            field = 'default'
-        if mode not in supportMode:
-            raise ValueError(f"不支持的模式： {mode}，仅支持 'r' 或 'w' 模式")
-
-        if field not in supportKey.keys():
-            raise ValueError(f"不支持的字段: {field}")
-        from src.main import WORK_PATH
-        configPath = os.path.join(WORK_PATH, "configs.json")
-        if not os.path.exists(configPath):
-            with open(configPath, 'w', encoding='utf-8') as f:
-                f.write('')
-
-        configs = {}
-        if os.path.exists(configPath):
-            try:
-                with open(configPath, 'r', encoding='utf-8') as f:
-                    data = f.read()
-                    if not (data is None) or not data == '':
-                        configs = json.loads(data)
-            except json.decoder.JSONDecodeError:
-                configs = {}
-
-        configs = {k: v for k, v in configs.items() if k in supportKey.keys()}
-
-        if mode == 'r':
-            for k, v in configs.items():
-                if k == field:
-                    if not (value is None) or not value == '':
-                        return v
-            configs[field] = supportKey.get(field)
-
-            with open(configPath, 'w', encoding='utf-8') as f:
-                json.dump(configs, f, indent=4)
-            return configs.get(field)
-
-        try:
-            if not isinstance(configs[field], list) and field == 'args':
-                configs[field] = []
-            elif field == 'args' and value != '':
-                for arg in value:
-                    if arg not in configs[field]:
-                        configs[field].append(arg)
-            else:
-                configs[field] = value
-            if value != '' or value == []:
-                with open(configPath, 'w', encoding='utf-8') as f:
-                    json.dump(configs, f, indent=4)
-            return None
-        except Exception as e:
-            raise IOError(f"写入配置失败: {str(e)}") from e
-    except Exception:
-        raise IOError('文件操作出现未知错误.')
-
 
 class config_manager:
     """配置管理类，实现原子化操作和类型校验"""

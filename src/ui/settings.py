@@ -11,11 +11,10 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QFileDialog, QListWidgetItem
 
 from src.ui.ui_settings import Ui_setting
-from src.utils.files_utils import config_helper
 from src.utils.logger import logger
 from src.utils.process_utils import get_process_path, async_check_process_is_run
-from utils.files_utils import config_manager
-from utils.process_utils import try_kill_process, try_find_client
+from src.utils.files_utils import config_manager
+from src.utils.process_utils import try_kill_process, try_find_client
 
 
 class MainWindow(QMainWindow):
@@ -126,7 +125,7 @@ class MainWindow(QMainWindow):
 
         if not client is None:
             logger.info(f"有效客户端 -> {client}")
-            config_helper(field='client', mode='w', value=client)
+            config_manager().set('client', client)
             self.ui.client_edit.setText(str(client))
             self.client = client
         else:
