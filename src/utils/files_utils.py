@@ -97,14 +97,15 @@ class config_manager:
         'client': 'Telegram.exe',
         'path': '',
         'default': '',
-        'tags': []
+        'tags': [],
+        'log_output': True,
     }
 
     _instance = None
     _lock = threading.Lock()
 
     def __new__(cls):
-        """增强型单例初始化"""
+        """初始化"""
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
@@ -115,7 +116,7 @@ class config_manager:
 
 
     def __initialize(self) -> None:
-        """延迟初始化方法"""
+        """初始化"""
         self._config_path = Path(os.path.join(os.getcwd(), 'configs.json'))
         self._temp_file = self._config_path.with_suffix('.tmp')
         self._config = self._load_config()
@@ -125,7 +126,7 @@ class config_manager:
         self.tag = ''
 
     def _load_config(self) -> Dict[str, Any]:
-        """安全加载配置（自动修复损坏配置）"""
+        """加载配置"""
         try:
             if not self._config_path.exists():
                 self._save_config(self._DEFAULT_CONFIG)
@@ -141,7 +142,7 @@ class config_manager:
             return self._DEFAULT_CONFIG.copy()
 
     def _save_config(self, config: Dict) -> None:
-        """原子化写入配置"""
+        """写入配置"""
         try:
             with open(self._temp_file, 'w', encoding='utf-8') as f:
                 json.dump(config, f, indent=4, ensure_ascii=False)
@@ -155,7 +156,7 @@ class config_manager:
 
     def save_multiple_fields(self, fields: Dict[str, Any]) -> None:
         """
-        批量保存多个配置字段（原子化操作）
+        保存多个配置字段
 
         参数：
         fields: 需更新的字段字典，键为字段名，值为新数据
@@ -189,13 +190,13 @@ class config_manager:
 
     def get_all_fields(self, with_default: bool = False) -> Dict[str, Any]:
         """
-        获取全部配置项（深度拷贝保障数据安全）
+        获取全部配置项
 
         参数：
         with_default - 是否包含默认值字段（默认False时仅返回用户修改过的字段）
 
         返回：
-        配置字典（包含类型转换后的值）
+        配置字典
 
         异常：
         ConfigError - 当配置完整性校验失败时抛出

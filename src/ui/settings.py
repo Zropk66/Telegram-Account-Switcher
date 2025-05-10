@@ -61,6 +61,8 @@ class MainWindow(QMainWindow):
         self.ui.del_button.clicked.connect(self.del_item)
         self.ui.tags_widget.itemDoubleClicked.connect(self.edit_item)
 
+        self.ui.log_output.setChecked(self.config.get("log_output"))
+
         self.ui.finish_button.clicked.connect(self.finish)
 
     class Worker(QRunnable):
@@ -141,7 +143,8 @@ class MainWindow(QMainWindow):
             'client': self.ui.client_edit.text(),
             'path': self.ui.path_edit.text(),
             'default': self.ui.default_edit.text(),
-            'tags': [self.ui.tags_widget.item(i).text() for i in range(self.ui.tags_widget.count())]
+            'tags': [self.ui.tags_widget.item(i).text() for i in range(self.ui.tags_widget.count())],
+            'log_output': self.ui.log_output.isChecked()
         }
         json.dumps(config, indent=4)
         self.config.save_multiple_fields(config)

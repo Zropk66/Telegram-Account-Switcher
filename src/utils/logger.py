@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
 # @Time : 2025/5/7 13:12
 # @Author : Zropk
+import json
 import logging
+import os
 import sys
 import traceback
+from pathlib import Path
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -25,6 +28,7 @@ def format_exception(exception):
 
 class popup_filter(logging.Filter):
     """过滤器"""
+
     def filter(self, record):
         is_show = record.levelno in {logging.TIPS, logging.CRITICAL}
         if is_show:
@@ -81,7 +85,12 @@ class AppLogger:
 
         self.logger.addFilter(popup_filter())
         self.logger.addHandler(console_handler)
-        self.logger.addHandler(file_handler)
+        try:
+            with open(Path(os.path.join(os.getcwd(), 'configs.json')), 'r', encoding='utf-8') as f:
+                if json.load(f).get('log_output'):
+                    self.logger.addHandler(file_handler)
+        except (FileNotFoundError, json.JSONDecodeError, IOError):
+            pass
         self.logger.propagate = False
 
 

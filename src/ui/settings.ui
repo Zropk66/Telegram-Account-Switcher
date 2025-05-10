@@ -182,7 +182,7 @@
       <x>90</x>
       <y>110</y>
       <width>261</width>
-      <height>131</height>
+      <height>101</height>
      </rect>
     </property>
     <property name="toolTip">
@@ -235,6 +235,22 @@
     </property>
     <property name="text">
      <string>保存</string>
+    </property>
+   </widget>
+   <widget class="QCheckBox" name="log_output">
+    <property name="geometry">
+     <rect>
+      <x>360</x>
+      <y>180</y>
+      <width>82</width>
+      <height>20</height>
+     </rect>
+    </property>
+    <property name="toolTip">
+     <string>控制日志是否写入到文件</string>
+    </property>
+    <property name="text">
+     <string>日志输出</string>
     </property>
    </widget>
   </widget>

@@ -15,9 +15,9 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QFont, QFontDatabase, QGradient, QIcon,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QApplication, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QMainWindow, QPushButton, QSizePolicy,
-    QWidget)
+from PySide6.QtWidgets import (QApplication, QCheckBox, QLabel, QLineEdit,
+    QListWidget, QListWidgetItem, QMainWindow, QPushButton,
+    QSizePolicy, QWidget)
 
 class Ui_setting(object):
     def setupUi(self, setting):
@@ -66,7 +66,7 @@ class Ui_setting(object):
         self.tags_label.setGeometry(QRect(20, 110, 54, 16))
         self.tags_widget = QListWidget(self.centralwidget)
         self.tags_widget.setObjectName(u"tags_widget")
-        self.tags_widget.setGeometry(QRect(90, 110, 261, 131))
+        self.tags_widget.setGeometry(QRect(90, 110, 261, 101))
         self.add_button = QPushButton(self.centralwidget)
         self.add_button.setObjectName(u"add_button")
         self.add_button.setGeometry(QRect(360, 110, 75, 24))
@@ -76,6 +76,9 @@ class Ui_setting(object):
         self.finish_button = QPushButton(self.centralwidget)
         self.finish_button.setObjectName(u"finish_button")
         self.finish_button.setGeometry(QRect(360, 215, 75, 24))
+        self.log_output = QCheckBox(self.centralwidget)
+        self.log_output.setObjectName(u"log_output")
+        self.log_output.setGeometry(QRect(360, 180, 82, 20))
         setting.setCentralWidget(self.centralwidget)
 
         self.retranslateUi(setting)
@@ -124,5 +127,9 @@ class Ui_setting(object):
         self.finish_button.setToolTip(QCoreApplication.translate("setting", u"\u4fdd\u5b58\u914d\u7f6e", None))
 #endif // QT_CONFIG(tooltip)
         self.finish_button.setText(QCoreApplication.translate("setting", u"\u4fdd\u5b58", None))
+#if QT_CONFIG(tooltip)
+        self.log_output.setToolTip(QCoreApplication.translate("setting", u"\u63a7\u5236\u65e5\u5fd7\u662f\u5426\u5199\u5165\u5230\u6587\u4ef6", None))
+#endif // QT_CONFIG(tooltip)
+        self.log_output.setText(QCoreApplication.translate("setting", u"\u65e5\u5fd7\u8f93\u51fa", None))
     # retranslateUi
 

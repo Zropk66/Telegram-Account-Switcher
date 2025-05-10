@@ -69,7 +69,8 @@ def get_process_path(client: str):
 
 def safe_exit(message=None, restore=False, kill_process=False):
     """退出程序"""
-    client = config_manager().get('client')
+    config = config_manager()
+    client = config.get('client')
     if kill_process:
         try_kill_process(client)
     if restore:
@@ -78,9 +79,9 @@ def safe_exit(message=None, restore=False, kill_process=False):
     logger.info('程序结束.')
     from src.utils.files_utils import restore_file
     atexit.unregister(restore_file)
-    from src.main import WORK_PATH
-    open(os.path.join(WORK_PATH, "TAS_log.txt"), 'a', encoding='utf-8').write(
-        '----------------------------------------\n')
+    if config.get('log_output'):
+        open(os.path.join(os.getcwd(), "TAS_log.txt"), 'a', encoding='utf-8').write(
+            '----------------------------------------\n')
     from src.main import lock
     lock.close()
     raise SystemExit(message)

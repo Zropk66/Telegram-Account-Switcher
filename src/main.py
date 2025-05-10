@@ -8,6 +8,7 @@ import os
 import os.path
 import subprocess
 import sys
+from datetime import datetime
 from typing import Optional
 
 from PySide6.QtWidgets import QApplication
@@ -17,12 +18,11 @@ from src.utils.files_utils import search_target_file_in_directories, is_exists, 
     config_manager
 from src.utils.logger import logger
 from src.utils.process_utils import safe_exit, try_kill_process, check_process_alive
-from src.utils.system_utils import handle_global_exception, bind_singleton
+from src.utils.system_utils import handle_global_exception, bind_singleton, format_timedelta
 
 logger = logger
 TITLE = 'TAS'
-VERSION = '1.1.1'
-WORK_PATH = os.getcwd()
+VERSION = '1.1.2'
 
 CONFIG_FILE = 'configs.json'
 CONFIG = config_manager()
@@ -46,10 +46,13 @@ def tdata_process():
             logger.error('客户端启动超时.')
             safe_exit()
         logger.info('客户端启动成功, 运行状况持续受到监控.')
+        start_time = datetime.now()
 
         while True:
             alive = check_process_alive(CONFIG.get('client'))
             if alive is False:
+                end_time = datetime.now()
+                logger.info(f"监控时长：{format_timedelta(end_time - start_time)}")
                 break
 
         safe_exit(restore=True)
@@ -61,7 +64,8 @@ def tdata_process():
 async def __tdata_process(tag):
     """异步检查客户端是否启动"""
     for i in range(30):
-        if tag == CONFIG.get('default') or tag == '':
+        tags = CONFIG.get('tags')
+        if tag not in tags:
             if is_exists(os.path.join(CONFIG.get('path'), 'tdata'), CONFIG.get('default')):
                 run_command()
             else:
@@ -69,7 +73,6 @@ async def __tdata_process(tag):
                     run_command()
             logger.info('客户端启动.')
             safe_exit()
-
         atexit.register(restore_file)
         startup_successful = False
         if is_exists(os.path.join(CONFIG.get('path'), 'tdata'), tag):
@@ -225,8 +228,8 @@ def initialize():
     if lock is False:
         logger.tips('当前已有实例正在运行.')
         sys.exit()
-    if not os.path.exists(os.path.join(WORK_PATH, CONFIG_FILE)):
-        logger.warning(f'配置文件 {os.path.join(WORK_PATH, CONFIG_FILE)} 不存在')
+    if not os.path.exists(os.path.join(os.getcwd(), CONFIG_FILE)):
+        logger.warning(f'配置文件 {os.path.join(os.getcwd(), CONFIG_FILE)} 不存在')
         open_setting_window()
     else:
         try:

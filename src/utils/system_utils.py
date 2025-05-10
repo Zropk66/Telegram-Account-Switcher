@@ -23,3 +23,11 @@ def bind_singleton(port):
         return lock_socket
     except socket.error:
         return False
+
+
+def format_timedelta(delta):
+    total_seconds = int(delta.total_seconds())
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    seconds = total_seconds % 60
+    return f"{hours}时{minutes}分{seconds}秒"
