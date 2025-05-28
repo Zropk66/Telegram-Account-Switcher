@@ -47,7 +47,7 @@ jobs:
             Write-Error "ERROR: $_"
             exit 1
           }
-          $OUTPUT_NAME = "TAS_V${VERSION}_$($env:OS_ENV)_Py${PY_VER}.exe"
+          $OUTPUT_NAME = "TAS_v${VERSION}_$($env:OS_ENV)_Py${PY_VER}.exe"
 
           Write-Output "Python Version: $PY_VER"
           Write-Output "TAS Version: $VERSION"

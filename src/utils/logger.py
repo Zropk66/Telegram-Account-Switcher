@@ -30,8 +30,7 @@ class popup_filter(logging.Filter):
     """过滤器"""
 
     def filter(self, record):
-        is_show = record.levelno in {logging.TIPS, logging.CRITICAL}
-        if is_show:
+        if record.levelno in {logging.TIPS, logging.CRITICAL}:
             try:
                 if isinstance(record.msg, BaseException):
                     message = format_exception(record.msg)
@@ -55,7 +54,7 @@ class popup_filter(logging.Filter):
         return record.levelno not in {logging.TIPS, logging.CRITICAL}
 
 
-class AppLogger:
+class TAS_logger:
     """初始化"""
     _instance = None
 
@@ -94,5 +93,4 @@ class AppLogger:
         self.logger.propagate = False
 
 
-app_logger = AppLogger()
-logger = app_logger.logger
+logger = TAS_logger().logger

@@ -14,21 +14,20 @@ from typing import Optional
 from PySide6.QtWidgets import QApplication
 
 from src.ui.settings import MainWindow
-from src.utils.files_utils import search_target_file_in_directories, is_exists, restore_file, modify_file, \
+from src.utils.files_utils import search_file_in_dirs, is_exists, recovery, account_switch, \
     config_manager
 from src.utils.logger import logger
 from src.utils.process_utils import safe_exit, try_kill_process, check_process_alive
-from src.utils.system_utils import handle_global_exception, bind_singleton, format_timedelta
+from src.utils.system_utils import handle_global_exception, check_lock, format_timedelta
 
 logger = logger
 TITLE = 'TAS'
-VERSION = '1.1.2'
+VERSION = '1.1.3'
 
 CONFIG_FILE = 'configs.json'
 CONFIG = config_manager()
 
-lock = bind_singleton(9564)
-
+lock = check_lock(9564)
 
 def open_setting_window():
     """打开设置窗口"""
@@ -54,7 +53,6 @@ def tdata_process():
                 end_time = datetime.now()
                 logger.info(f"监控时长：{format_timedelta(end_time - start_time)}")
                 break
-
         safe_exit(restore=True)
     except Exception:
         logger.error('参数解析失败.', exc_info=True)
@@ -62,26 +60,24 @@ def tdata_process():
 
 
 async def __tdata_process(tag):
-    """异步检查客户端是否启动"""
+    """判断账户是否切换"""
     for i in range(30):
         tags = CONFIG.get('tags')
         if tag not in tags:
             if is_exists(os.path.join(CONFIG.get('path'), 'tdata'), CONFIG.get('default')):
                 run_command()
             else:
-                if modify_file('restore'):
+                if account_switch('restore'):
                     run_command()
             logger.info('客户端启动.')
             safe_exit()
-        atexit.register(restore_file)
+        atexit.register(recovery)
         startup_successful = False
         if is_exists(os.path.join(CONFIG.get('path'), 'tdata'), tag):
-            run_command()
-            startup_successful = True
+            startup_successful = run_command()
         else:
-            if modify_file('modify'):
-                run_command()
-                startup_successful = True
+            if account_switch('switch'):
+                startup_successful = run_command()
             else:
                 safe_exit(restore=True)
         return startup_successful
@@ -92,7 +88,7 @@ def run_command():
     """启动目标程序"""
     client_path = os.path.join(CONFIG.get('path'), CONFIG.get('client'))
     try:
-        proc = subprocess.Popen(
+        subprocess.Popen(
             [str(client_path)],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -104,12 +100,12 @@ def run_command():
             alive = check_process_alive(CONFIG.get('client'))
             if alive:
                 break
-        return proc
+        return True
     except FileNotFoundError:
         logger.error(f"客户端路径不存在: {client_path}")
     except Exception as e:
         logger.error(f"启动异常: {str(e)}")
-    return None
+    return False
 
 def check_client(client):
     """检查客户端"""
@@ -133,7 +129,7 @@ def check_default_tdata(default_tdata):
     if default_tdata == '':
         logger.warning('未设置默认 Tdata.')
         return False
-    if not search_target_file_in_directories(CONFIG.get('path'), default_tdata):
+    if not search_file_in_dirs(CONFIG.get('path'), default_tdata):
         logger.tips(f"默认帐户配置无效, 未找到标签为 '{default_tdata}' 的帐户文件夹")
         return False
     return True
@@ -202,7 +198,7 @@ def validate_login_tag(tag: str) -> str:
         logger.warning(f"未注册的标签: {tag}")
         return CONFIG.get('default')
 
-    if not search_target_file_in_directories(CONFIG.get('path'), tag):
+    if not search_file_in_dirs(CONFIG.get('path'), tag):
         logger.error(f"标签文件缺失 {tag}")
         return CONFIG.get('default')
     return tag
@@ -247,7 +243,7 @@ def main():
     """主函数"""
     initialize()
     try_kill_process(CONFIG.get('client'))
-    atexit.register(restore_file)
+    atexit.register(recovery)
     tdata_process()
-    atexit.unregister(restore_file)
+    atexit.unregister(recovery)
     logger.info('程序运行结束.')

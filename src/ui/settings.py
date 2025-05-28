@@ -24,8 +24,7 @@ class MainWindow(QMainWindow):
         self.ui.setupUi(self)
         self.threadPool = QThreadPool.globalInstance()
 
-        self.get_client_lock = False
-        self.get_path_lock = False
+        self.lock = False
 
         try:
             self.config = config_manager()
@@ -49,13 +48,13 @@ class MainWindow(QMainWindow):
             item = self.ui.tags_widget.item(i)
             item.setFlags(item.flags() | Qt.ItemIsEditable)
 
-        self.client_edit_double_click_filter = self.DoubleClickFilter(self.client_edit_double_click_event)
+        self.client_edit_double_click_filter = self.double_click_filter(self.client_edit_double_click_event)
         self.ui.client_edit.installEventFilter(self.client_edit_double_click_filter)
-        self.ui.client_button.clicked.connect(lambda: self.threadPool.start(self.Worker(self.get_client)))
+        self.ui.client_button.clicked.connect(lambda: self.threadPool.start(self.runnable_function(self.get_client)))
 
-        self.path_edit_double_click_filter = self.DoubleClickFilter(self.path_edit_double_click_event)
+        self.path_edit_double_click_filter = self.double_click_filter(self.path_edit_double_click_event)
         self.ui.path_edit.installEventFilter(self.path_edit_double_click_filter)
-        self.ui.path_button.clicked.connect(lambda: self.threadPool.start(self.Worker(self.get_path)))
+        self.ui.path_button.clicked.connect(lambda: self.threadPool.start(self.runnable_function(self.get_path)))
 
         self.ui.add_button.clicked.connect(self.add_item)
         self.ui.del_button.clicked.connect(self.del_item)
@@ -65,27 +64,26 @@ class MainWindow(QMainWindow):
 
         self.ui.finish_button.clicked.connect(self.finish)
 
-    class Worker(QRunnable):
-        def __init__(self, fun):
+    class runnable_function(QRunnable):
+        def __init__(self, func):
             super().__init__()
-            self.fun = fun
+            self.func = func
 
         def run(self):
-            self.fun()
+            self.func()
 
     def get_path(self):
         """自动获取路径"""
-        if self.get_path_lock:
-            return
-        self.get_path_lock = True
+        if self.lock: return
+        self.lock = True
+
         if not self.client:
             logger.warning('客户端名称未设置，请先获取客户端名称后重试.')
         try:
             QDesktopServices.openUrl(QUrl("tg:"))
         except Exception as e:
             logger.error(e)
-        client_is_run = check_process_alive(self.client)
-        if not client_is_run:
+        if not check_process_alive(self.client):
             logger.warning("无法获取到路径，您使用的telegram可能不在我们的预设池里，请手动设置.")
             return
         effective_path = get_process_path(str(self.client))
@@ -96,14 +94,13 @@ class MainWindow(QMainWindow):
         logger.info(f"有效路径 -> {effective_path}")
         self.config.set('path', effective_path)
         self.ui.path_edit.setText(effective_path)
-        self.get_path_lock = False
+        self.lock = False
         return
 
     def get_client(self):
         """自动获取客户端"""
-        if self.get_client_lock:
-            return
-        self.get_client_lock = True
+        if self.lock: return
+        self.lock = True
 
         process = QProcess(self)
         QDesktopServices.openUrl(QUrl("tg:"))
@@ -120,11 +117,9 @@ class MainWindow(QMainWindow):
         client = None
 
         for _ in range(10):
-            if process.waitForFinished(1000):
-                break
+            if process.waitForFinished(1000): break
             client = try_find_client(client_map)
             if client: break
-
         if not client is None:
             logger.info(f"有效客户端 -> {client}")
             config_manager().set('client', client)
@@ -135,7 +130,7 @@ class MainWindow(QMainWindow):
             self.ui.client_edit.setText('')
         time.sleep(1)
         try_kill_process(self.client)
-        self.get_client_lock = False
+        self.lock = False
 
     def finish(self):
         """保存所有设置"""
@@ -178,16 +173,20 @@ class MainWindow(QMainWindow):
     def path_edit_double_click_event(self):
         """路径选择事件"""
         path = QFileDialog.getExistingDirectory(self, "选择客户端路径", "")
-        if path:
-            self.ui.path_edit.setText(path)
+        if path: self.ui.path_edit.setText(path)
 
-    class DoubleClickFilter(QObject):
-        def __init__(self, fun):
+    class double_click_filter(QObject):
+        """通用双击事件过滤器 (支持条件校验)"""
+
+        def __init__(self, callback, target_widget=None):
             super().__init__()
-            self.fun = fun
+            self.callback = callback
+            self.target_widget = target_widget
 
         def eventFilter(self, obj, event):
             if event.type() == QEvent.MouseButtonDblClick:
-                self.fun()
-                return True
+                if event.button() == Qt.LeftButton:
+                    if self.target_widget is None or obj is self.target_widget:
+                        self.callback()
+                        return True
             return super().eventFilter(obj, event)

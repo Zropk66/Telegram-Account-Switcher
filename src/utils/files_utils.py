@@ -8,13 +8,13 @@ import sys
 import threading
 import time
 from copy import deepcopy
-from typing import Any, Dict
 from pathlib import Path
+from typing import Any, Dict
 
 from src.utils.logger import logger
 
 
-def search_target_file_in_directories(base_path: str, target_file: str):
+def search_file_in_dirs(base_path: str, target_file: str):
     """检测文件夹中是否存在指定文件"""
     if not os.path.isdir(base_path):
         return ''
@@ -38,7 +38,7 @@ def is_exists(base_path: str, target_file: str):
         return False
 
 
-def modify_file(mode: str, retries=0, max_retries=3):
+def account_switch(mode: str, retries=0, max_retries=5):
     """修改tdata文件，实现不同账号登录"""
     path = config_manager().get('path')
     default = config_manager().get('default')
@@ -50,45 +50,56 @@ def modify_file(mode: str, retries=0, max_retries=3):
     temp = f'tdata-{random_str}'
     try:
         if mode == 'restore':
-            try:
-                os.rename(os.path.join(path, 'tdata'), os.path.join(path, temp))
-            except FileNotFoundError:
-                pass
-            os.rename(
-                os.path.join(path, search_target_file_in_directories(path, default)),
-                os.path.join(path, 'tdata'))
-            logger.info('恢复账户.')
-            return True
-        elif mode == 'modify':
-            try:
-                arg_dir = os.path.join(path, search_target_file_in_directories(path, arg))
-            except TypeError:
+            if switch_to_default(path, default, temp):
+                logger.info('账户已切换为默认账户.')
                 return True
-            try:
-                os.rename(os.path.join(path, 'tdata'), os.path.join(path, temp))
-            except FileNotFoundError:
-                pass
-            os.rename(arg_dir, os.path.join(path, 'tdata'))
-            logger.info('账户切换.')
-            return True
-        logger.error(f"模式 '{mode}' 无法执行，文件状态不符合要求.")
-        return False
-    except (FileNotFoundError, PermissionError) as e:
-        logger.error(f"文件操作失败: {e}, 重试... ({retries + 1}/{max_retries})")
+            else:
+                return False
+        elif mode == 'switch':
+            if switch_to_target(path, arg, temp):
+                logger.info(f"已切换为目标账户 -> '{arg}'.")
+                return True
+            else:
+                return False
+        raise TypeError(f"模式 '{mode}' 未定义.")
+    except PermissionError:
+        logger.error(f"权限不足, 正在重试... ({retries + 1}/{max_retries})")
         time.sleep(1)
-        return modify_file(mode, retries + 1, max_retries)
+        return account_switch(mode, retries + 1, max_retries)
 
-
-def restore_file():
-    """程序结束时自动还原"""
+def switch_to_default(path, default, temp):
+    """切换回默认账户"""
     try:
-        client = config_manager.get('client')
+        os.rename(os.path.join(path, 'tdata'), os.path.join(path, temp))
+    except FileNotFoundError:
+        pass
+    os.rename(
+        os.path.join(path, search_file_in_dirs(path, default)),
+        os.path.join(path, 'tdata'))
+    return True
+
+def switch_to_target(path, arg, temp):
+    """切换为目标账户"""
+    try:
+        arg_dir = os.path.join(path, search_file_in_dirs(path, arg))
+    except TypeError:
+        return True
+    os.rename(os.path.join(path, 'tdata'), os.path.join(path, temp))
+    os.rename(arg_dir, os.path.join(path, 'tdata'))
+    return True
+
+def recovery():
+    """强制恢复为默认账户"""
+    try:
+        client = config_manager().get('client')
         from src.utils.process_utils import try_kill_process
         try_kill_process(client)
         time.sleep(1)
-        modify_file('restore')
+        time.sleep(1)
+        account_switch('restore')
     except (FileNotFoundError, PermissionError):
         logger.error('恢复帐户时出现错误.')
+
 
 class config_manager:
     """配置管理类，实现原子化操作和类型校验"""
@@ -113,7 +124,6 @@ class config_manager:
                     cls._instance.__init_flag = False
                     cls._instance.__initialize()
         return cls._instance
-
 
     def __initialize(self) -> None:
         """初始化"""
@@ -155,17 +165,7 @@ class config_manager:
                 self._temp_file.unlink()
 
     def save_multiple_fields(self, fields: Dict[str, Any]) -> None:
-        """
-        保存多个配置字段
-
-        参数：
-        fields: 需更新的字段字典，键为字段名，值为新数据
-
-        异常：
-        KeyError - 包含无效字段时抛出
-        TypeError - 字段类型不匹配时抛出
-        IOError - 文件写入失败时抛出
-        """
+        """一次性保存多个配置字段"""
         invalid_fields = [k for k in fields if k not in self._DEFAULT_CONFIG]
         if invalid_fields:
             raise KeyError(f"无效配置字段: {', '.join(invalid_fields)}")
@@ -188,19 +188,8 @@ class config_manager:
         except Exception as e:
             raise self.ConfigError(f"批量保存失败: {str(e)}") from e
 
-    def get_all_fields(self, with_default: bool = False) -> Dict[str, Any]:
-        """
-        获取全部配置项
-
-        参数：
-        with_default - 是否包含默认值字段（默认False时仅返回用户修改过的字段）
-
-        返回：
-        配置字典
-
-        异常：
-        ConfigError - 当配置完整性校验失败时抛出
-        """
+    def get_all(self, with_default: bool = False) -> Dict[str, Any]:
+        """获取全部配置项"""
         configs = deepcopy(self._config)
         if not with_default:
             return {
@@ -209,13 +198,8 @@ class config_manager:
             }
         return configs
 
-
     def get(self, field: str) -> Any:
-        """
-        获取配置项值
-        :param field: 配置字段名
-        :return: 配置值，不存在时返回默认值
-        """
+        """获取配置项值"""
         if field == 'tag':
             return self.tag
         if field not in self._DEFAULT_CONFIG:
@@ -223,11 +207,7 @@ class config_manager:
         return self._config.get(field, self._DEFAULT_CONFIG[field])
 
     def set(self, field: str, value: Any) -> None:
-        """
-        设置配置项值
-        :param field: 配置字段名
-        :param value: 要设置的值
-        """
+        """设置配置项值"""
         if field == 'tag':
             self.tag = value
             return
@@ -244,10 +224,7 @@ class config_manager:
         self._save_config(self._config)
 
     def delete(self, field: str) -> None:
-        """
-        删除配置项，恢复默认值
-        :param field: 配置字段名
-        """
+        """删除配置项，恢复默认值"""
         if field not in self._DEFAULT_CONFIG:
             raise KeyError(f"无效配置项: {field}")
 
@@ -258,7 +235,6 @@ class config_manager:
     def config_path(self) -> Path:
         """返回配置文件路径"""
         return self._config_path
-
 
     class ConfigError(Exception):
         """自定义配置异常"""

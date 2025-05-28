@@ -15,8 +15,7 @@ def check_process_alive(client: str):
         raise TypeError("'client' must be 'str'")
     for process in psutil.process_iter(attrs=['name']):
         try:
-            if client == process.name():
-                return True
+            if client == process.name(): return True
         except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
             logger.error(e)
     return False
@@ -74,11 +73,11 @@ def safe_exit(message=None, restore=False, kill_process=False):
     if kill_process:
         try_kill_process(client)
     if restore:
-        from src.utils.files_utils import modify_file
-        modify_file('restore')
+        from src.utils.files_utils import account_switch
+        account_switch('restore')
     logger.info('程序结束.')
-    from src.utils.files_utils import restore_file
-    atexit.unregister(restore_file)
+    from src.utils.files_utils import recovery
+    atexit.unregister(recovery)
     if config.get('log_output'):
         open(os.path.join(os.getcwd(), "TAS_log.txt"), 'a', encoding='utf-8').write(
             '----------------------------------------\n')
