@@ -2,114 +2,36 @@
 # @Time : 2025/1/2 13:12
 # @Author : Zropk
 import argparse
-import asyncio
 import atexit
 import os
 import os.path
-import subprocess
 import sys
-from datetime import datetime
 from typing import Optional
 
 from PySide6.QtWidgets import QApplication
 
-from src.ui.settings import MainWindow
-from src.utils.files_utils import search_file_in_dirs, is_exists, recovery, account_switch, \
-    config_manager
-from src.utils.logger import logger
-from src.utils.process_utils import safe_exit, try_kill_process, check_process_alive
-from src.utils.system_utils import handle_global_exception, check_lock, format_timedelta
+from src.ui import SettingsWindow
+from src.utils import Logger, search_file_in_dirs, recovery, ConfigManage, try_kill_process, handle_global_exception, \
+    TdataProcess
 
-logger = logger
+logger = Logger()
 TITLE = 'TAS'
 VERSION = '1.1.3'
 
 CONFIG_FILE = 'configs.json'
-CONFIG = config_manager()
-
-lock = check_lock(9564)
+CONFIG = ConfigManage()
 
 def open_setting_window():
     """打开设置窗口"""
     app = QApplication.instance() or QApplication(sys.argv)
-    widget = MainWindow()
+    widget = SettingsWindow()
     widget.show()
     sys.exit(app.exec())
 
 
-def tdata_process():
-    """判断 tdata 状态并执行相关操作"""
-    try:
-        tag = CONFIG.get('tag')
-        if asyncio.run(__tdata_process(tag)) is False:
-            logger.error('客户端启动超时.')
-            safe_exit()
-        logger.info('客户端启动成功, 运行状况持续受到监控.')
-        start_time = datetime.now()
-
-        while True:
-            alive = check_process_alive(CONFIG.get('client'))
-            if alive is False:
-                end_time = datetime.now()
-                logger.info(f"监控时长：{format_timedelta(end_time - start_time)}")
-                break
-        safe_exit(restore=True)
-    except Exception:
-        logger.error('参数解析失败.', exc_info=True)
-        safe_exit(restore=True)
-
-
-async def __tdata_process(tag):
-    """判断账户是否切换"""
-    for i in range(30):
-        tags = CONFIG.get('tags')
-        if tag not in tags:
-            if is_exists(os.path.join(CONFIG.get('path'), 'tdata'), CONFIG.get('default')):
-                run_command()
-            else:
-                if account_switch('restore'):
-                    run_command()
-            logger.info('客户端启动.')
-            safe_exit()
-        atexit.register(recovery)
-        startup_successful = False
-        if is_exists(os.path.join(CONFIG.get('path'), 'tdata'), tag):
-            startup_successful = run_command()
-        else:
-            if account_switch('switch'):
-                startup_successful = run_command()
-            else:
-                safe_exit(restore=True)
-        return startup_successful
-    return False
-
-
-def run_command():
-    """启动目标程序"""
-    client_path = os.path.join(CONFIG.get('path'), CONFIG.get('client'))
-    try:
-        subprocess.Popen(
-            [str(client_path)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            stdin=subprocess.DEVNULL,
-            shell=True,
-            start_new_session=True
-        )
-        while True:
-            alive = check_process_alive(CONFIG.get('client'))
-            if alive:
-                break
-        return True
-    except FileNotFoundError:
-        logger.error(f"客户端路径不存在: {client_path}")
-    except Exception as e:
-        logger.error(f"启动异常: {str(e)}")
-    return False
-
 def check_client(client):
     """检查客户端"""
-    path = CONFIG.get('path')
+    path = CONFIG.path
     if os.path.isfile(os.path.join(path, client)):
         return True
     logger.warning('无法找到客户端.')
@@ -129,7 +51,7 @@ def check_default_tdata(default_tdata):
     if default_tdata == '':
         logger.warning('未设置默认 Tdata.')
         return False
-    if not search_file_in_dirs(CONFIG.get('path'), default_tdata):
+    if not search_file_in_dirs(CONFIG.path, default_tdata):
         logger.tips(f"默认帐户配置无效, 未找到标签为 '{default_tdata}' 的帐户文件夹")
         return False
     return True
@@ -138,7 +60,7 @@ def check_default_tdata(default_tdata):
 def parse_arguments() -> argparse.Namespace:
     """参数解析"""
     parser = argparse.ArgumentParser(
-        description='应用参数解析器',
+        description='参数解析器',
         add_help=False,
         exit_on_error=False
     )
@@ -166,7 +88,7 @@ def check_argument() -> Optional[str]:
     try:
         args = parse_arguments()
     except argparse.ArgumentError:
-        return CONFIG.get('default')
+        return CONFIG.default
 
     if args.help:
         logger.tips("--version -> 获取版本\n"
@@ -190,40 +112,37 @@ def check_argument() -> Optional[str]:
 
 def validate_login_tag(tag: str) -> str:
     """验证登录标签"""
-    tags = CONFIG.get('tags')
-    if tag == CONFIG.get('default'):
+    tags = CONFIG.tags
+    if tag == CONFIG.default:
         return tag
 
     if tag not in tags:
         logger.warning(f"未注册的标签: {tag}")
-        return CONFIG.get('default')
+        return CONFIG.default
 
-    if not search_file_in_dirs(CONFIG.get('path'), tag):
+    if not search_file_in_dirs(CONFIG.path, tag):
         logger.error(f"标签文件缺失 {tag}")
-        return CONFIG.get('default')
+        return CONFIG.default
     return tag
 
+
 def check_configs():
-    if check_client(CONFIG.get('client')) is False:
+    CONFIG.tag = str(check_argument())
+    if check_client(CONFIG.client) is False:
         logger.tips('客户端检查失败.')
         return False
-    if check_path(CONFIG.get('path')) is False:
+    if check_path(CONFIG.path) is False:
         logger.tips('路径检查失败.')
         return False
-    if check_default_tdata(CONFIG.get('default')) is False:
+    if check_default_tdata(CONFIG.default) is False:
         logger.tips('默认标签检查失败.')
         return False
-    CONFIG.set('tag', check_argument())
     return True
 
 
 def initialize():
     """初始化函数"""
     sys.excepthook = handle_global_exception
-
-    if lock is False:
-        logger.tips('当前已有实例正在运行.')
-        sys.exit()
     if not os.path.exists(os.path.join(os.getcwd(), CONFIG_FILE)):
         logger.warning(f'配置文件 {os.path.join(os.getcwd(), CONFIG_FILE)} 不存在')
         open_setting_window()
@@ -241,9 +160,14 @@ def initialize():
 
 def main():
     """主函数"""
+    # try:
+    #     if isinstance(args, tuple):
+    #         sys.argv = ['program.py'] + ''.join(args).split(' ')
+    # except IndexError:
+    #     pass
     initialize()
-    try_kill_process(CONFIG.get('client'))
+    try_kill_process(CONFIG.client)
     atexit.register(recovery)
-    tdata_process()
+    TdataProcess().process()
     atexit.unregister(recovery)
-    logger.info('程序运行结束.')
+    logger.info('任务完成!')

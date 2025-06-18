@@ -6,8 +6,8 @@ import os
 
 import psutil
 
-from src.utils.files_utils import config_manager
-from src.utils.logger import logger
+from src.utils.config_manage import ConfigManage
+from src.utils.logger import Logger
 
 
 def check_process_alive(client: str):
@@ -17,7 +17,7 @@ def check_process_alive(client: str):
         try:
             if client == process.name(): return True
         except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
-            logger.error(e)
+            Logger().error(e)
     return False
 
 
@@ -33,7 +33,7 @@ def try_kill_process(client: str):
             except psutil.NoSuchProcess:
                 return True
             except (PermissionError, psutil.AccessDenied) as e:
-                logger.error(e, exc_info=True)
+                Logger().error(e, exc_info=True)
     return False
 
 
@@ -49,7 +49,7 @@ def try_find_client(clients: list):
             if any(keyword.lower() in process_name.lower() for keyword in clients):
                 return process_name
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as e:
-            logger.error(e)
+            Logger().error(e)
     return None
 
 
@@ -62,25 +62,24 @@ def get_process_path(client: str):
             if client == process_name:
                 return os.path.dirname(process.info['exe'])
         except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
-            logger.error(e)
+            Logger().error(e)
     return None
 
 
 def safe_exit(message=None, restore=False, kill_process=False):
     """退出程序"""
-    config = config_manager()
-    client = config.get('client')
+    config = ConfigManage()
     if kill_process:
-        try_kill_process(client)
+        try_kill_process(config.client)
     if restore:
         from src.utils.files_utils import account_switch
         account_switch('restore')
-    logger.info('程序结束.')
+    Logger().info('任务完成!')
     from src.utils.files_utils import recovery
     atexit.unregister(recovery)
-    if config.get('log_output'):
-        open(os.path.join(os.getcwd(), "TAS_log.txt"), 'a', encoding='utf-8').write(
-            '----------------------------------------\n')
-    from src.main import lock
-    lock.close()
+    if config.log_output:
+        with open(os.path.join(os.getcwd(), "TAS.log"), 'a', encoding='utf-8') as f:
+            f.write('----------------------------------------\n')
+    # from src.main import lock
+    # lock.close()
     raise SystemExit(message)
