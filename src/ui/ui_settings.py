@@ -3,7 +3,7 @@
 ################################################################################
 ## Form generated from reading UI file 'settings.ui'
 ##
-## Created by: Qt User Interface Compiler version 6.9.0
+## Created by: Qt User Interface Compiler version 6.9.1
 ##
 ## WARNING! All changes made in this file will be lost when recompiling UI file!
 ################################################################################
@@ -41,12 +41,9 @@ class Ui_setting(object):
         self.client_label = QLabel(self.centralwidget)
         self.client_label.setObjectName(u"client_label")
         self.client_label.setGeometry(QRect(20, 20, 54, 16))
-        self.client_button = QPushButton(self.centralwidget)
-        self.client_button.setObjectName(u"client_button")
-        self.client_button.setGeometry(QRect(360, 20, 75, 24))
-        self.path_button = QPushButton(self.centralwidget)
-        self.path_button.setObjectName(u"path_button")
-        self.path_button.setGeometry(QRect(360, 50, 75, 24))
+        self.search_client_button = QPushButton(self.centralwidget)
+        self.search_client_button.setObjectName(u"search_client_button")
+        self.search_client_button.setGeometry(QRect(360, 20, 75, 51))
         self.path_label = QLabel(self.centralwidget)
         self.path_label.setObjectName(u"path_label")
         self.path_label.setGeometry(QRect(20, 50, 54, 16))
@@ -94,13 +91,9 @@ class Ui_setting(object):
         self.client_edit.setPlaceholderText(QCoreApplication.translate("setting", u"\u8bf7\u8f93\u5165\u5ba2\u6237\u7aef\u7684\u540d\u79f0", None))
         self.client_label.setText(QCoreApplication.translate("setting", u"\u5ba2\u6237\u7aef", None))
 #if QT_CONFIG(tooltip)
-        self.client_button.setToolTip(QCoreApplication.translate("setting", u"\u81ea\u52a8\u83b7\u53d6\u5ba2\u6237\u7aef\u540d\u79f0", None))
+        self.search_client_button.setToolTip(QCoreApplication.translate("setting", u"\u81ea\u52a8\u83b7\u53d6\u5ba2\u6237\u7aef\u540d\u79f0", None))
 #endif // QT_CONFIG(tooltip)
-        self.client_button.setText(QCoreApplication.translate("setting", u"\u81ea\u52a8\u83b7\u53d6", None))
-#if QT_CONFIG(tooltip)
-        self.path_button.setToolTip(QCoreApplication.translate("setting", u"\u81ea\u52a8\u83b7\u53d6\u5ba2\u6237\u7aef\u8def\u5f84", None))
-#endif // QT_CONFIG(tooltip)
-        self.path_button.setText(QCoreApplication.translate("setting", u"\u81ea\u52a8\u83b7\u53d6", None))
+        self.search_client_button.setText(QCoreApplication.translate("setting", u"\u81ea\u52a8\u83b7\u53d6", None))
         self.path_label.setText(QCoreApplication.translate("setting", u"\u8def\u5f84", None))
 #if QT_CONFIG(tooltip)
         self.path_edit.setToolTip(QCoreApplication.translate("setting", u"\u5728\u8fd9\u91cc\u8f93\u5165\u4f60\u6240\u4f7f\u7528\u7684Telegram\u5ba2\u6237\u7aef\u8def\u5f84", None))

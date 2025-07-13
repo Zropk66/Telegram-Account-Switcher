@@ -67,33 +67,17 @@
      <string>客户端</string>
     </property>
    </widget>
-   <widget class="QPushButton" name="client_button">
+   <widget class="QPushButton" name="search_client_button">
     <property name="geometry">
      <rect>
       <x>360</x>
       <y>20</y>
       <width>75</width>
-      <height>24</height>
+      <height>51</height>
      </rect>
     </property>
     <property name="toolTip">
      <string>自动获取客户端名称</string>
-    </property>
-    <property name="text">
-     <string>自动获取</string>
-    </property>
-   </widget>
-   <widget class="QPushButton" name="path_button">
-    <property name="geometry">
-     <rect>
-      <x>360</x>
-      <y>50</y>
-      <width>75</width>
-      <height>24</height>
-     </rect>
-    </property>
-    <property name="toolTip">
-     <string>自动获取客户端路径</string>
     </property>
     <property name="text">
      <string>自动获取</string>

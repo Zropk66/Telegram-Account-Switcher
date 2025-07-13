@@ -1,35 +1,39 @@
-# 规范相对导入并定义 __all__
-from .config_manage import ConfigManage, ConfigError
+from .config_manage import ConfigManage
 from .files_utils import (
     search_file_in_dirs,
     is_exists,
-    account_switch,
     validate_path,
-    recovery
 )
 from .process_utils import (
-    check_process_alive,
     try_kill_process,
-    try_find_client,
-    get_process_path,
-    safe_exit
+    ProcessWatcher
 )
-from .system_utils import handle_global_exception, format_timedelta
-from .tdata_process import TdataProcess
-from .logger import Logger
+from .system_utils import (
+    handle_global_exception,
+    format_timedelta
+)
+from .exceptions import (
+    TASException,
+    TASConfigException
+)
+from .files_utils import (
+    AccountSwitcher, recovery
+)
+from .logger import (
+    Logger
+)
 
 __all__ = [
-    'ConfigManage', 'ConfigError',
+    'ConfigManage',
 
     'search_file_in_dirs', 'is_exists',
-    'account_switch', 'validate_path',
-    'recovery',
+    'validate_path', 'recovery',
 
-    'check_process_alive', 'try_kill_process',
-    'try_find_client', 'get_process_path',
-    'safe_exit',
+    'try_kill_process', 'ProcessWatcher',
+
+    'TASException', 'TASConfigException',
 
     'handle_global_exception', 'format_timedelta',
 
-    'TdataProcess', 'Logger'
+    'AccountSwitcher', 'Logger'
 ]
