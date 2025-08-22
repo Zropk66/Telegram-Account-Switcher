@@ -1,15 +1,14 @@
 # -*- coding: utf-8 -*-
 # @Time : 2025/5/7 13:12
 # @Author : Zropk
-import json
-import os
-import time
+from typing import Dict, Any, Optional
+from threading import RLock, Thread
+from contextlib import suppress
 from copy import deepcopy
 from pathlib import Path
-from threading import RLock, Thread
-from typing import Dict, Any, Optional
-
-from src.utils.exceptions import TASConfigException
+import json
+import time
+import os
 
 
 class ConfigField:
@@ -42,9 +41,8 @@ class ConfigField:
         self._cache[instance_id] = value
 
         instance._config[self.name] = value
-
-        if not instance._batch_mode and self.name not in ['tag', 'process_status', 'complete']:
-            instance._config_changed = True
+        instance._config_changed = True
+        instance._save_config(instance._config)
 
     def clear_cache(self, instance: Any) -> None:
         """清除特定实例的缓存"""
@@ -60,7 +58,6 @@ class ConfigManage:
     default = ConfigField('default', str)
     tags = ConfigField('tags', list)
     log_output = ConfigField('log_output', bool)
-    tag = ConfigField('tag', str)
 
     _instance = None
     _lock = RLock()
@@ -89,7 +86,7 @@ class ConfigManage:
 
         self._config = self._load_config()
 
-        self._batch_mode = False
+        self._batch = False
         self._config_changed = False
         self._save_thread = None
         self._save_thread_running = True
@@ -97,11 +94,15 @@ class ConfigManage:
 
         self._process_status = False
         self._complete = False
+        self._decrypted = False
+        self._has_backup = False
+        self._password = ''
+        self._tag = ''
 
         self._start_auto_save()
 
     def __del__(self):
-        """析构函数，停止自动保存线程"""
+        """停止自动保存线程"""
         self._save_thread_running = False
         if self._save_thread and self._save_thread.is_alive():
             self._save_thread.join(timeout=1.0)
@@ -111,13 +112,13 @@ class ConfigManage:
 
     def __enter__(self):
         """进入批量更新模式"""
-        self._batch_mode = True
+        self._batch = True
         self._snapshot = deepcopy(self._config)
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """退出批量更新模式"""
-        self._batch_mode = False
+        self._batch = False
         if exc_type is not None:
             self._config = self._snapshot
             self._config_changed = True
@@ -134,6 +135,8 @@ class ConfigManage:
         while self._save_thread_running:
             if self._config_changed:
                 self._save_config(self._config)
+            if self._complete:
+                break
             time.sleep(5)
 
     def batch_update(self, updates: Dict[str, Any]) -> None:
@@ -141,6 +144,7 @@ class ConfigManage:
         with self:
             for field, value in updates.items():
                 setattr(self, field, value)
+                self._save_config(self._config)
 
     def _load_config(self) -> Dict[str, Any]:
         """加载配置文件"""
@@ -162,14 +166,12 @@ class ConfigManage:
     def _save_config(self, configs: Dict[str, Any]) -> None:
         """保存配置文件"""
         if not self._config_path.parent.exists():
+            from src.modules.exceptions import TASConfigException
             raise TASConfigException('配置目录验证失败')
-
         try:
             config_copy = configs.copy()
-            try:
+            with suppress(KeyError):
                 config_copy.pop('tag')
-            except KeyError:
-                pass
 
             with open(self._temp_file, 'w', encoding='utf-8') as f:
                 json.dump(config_copy, f, indent=4, ensure_ascii=False)
@@ -180,10 +182,20 @@ class ConfigManage:
             self._config_changed = False
         finally:
             if self._temp_file.exists():
-                try:
+                with suppress(OSError):
                     self._temp_file.unlink()
-                except OSError:
-                    pass
+
+    @property
+    def tag(self) -> str:
+        """获取临时标签"""
+        return self._tag
+
+    @tag.setter
+    def tag(self, value: str) -> None:
+        """设置临时标签"""
+        if not isinstance(value, str):
+            raise TypeError(f"tag 的类型必须为 {str}")
+        self._tag = value
 
     @property
     def process_status(self) -> bool:
@@ -208,6 +220,42 @@ class ConfigManage:
         if not isinstance(value, bool):
             raise TypeError(f"complete 的类型必须为 {bool}")
         self._complete = value
+
+    @property
+    def pwd(self) -> str:
+        """获取解密密钥"""
+        return self._password
+
+    @pwd.setter
+    def pwd(self, value: str) -> None:
+        """设置解密密钥"""
+        if not isinstance(value, str):
+            raise TypeError(f"pwd 的类型必须为 {str}")
+        self._password = value
+
+    @property
+    def decrypted(self):
+        """获取解密状态"""
+        return self._decrypted
+
+    @decrypted.setter
+    def decrypted(self, value: bool) -> None:
+        """设置解密状态"""
+        if not isinstance(value, bool):
+            raise TypeError(f"decrypted 的类型必须为 {bool}")
+        self._decrypted = value
+
+    @property
+    def has_backup(self):
+        """获取备份状态"""
+        return self._has_backup
+
+    @has_backup.setter
+    def has_backup(self, value: bool) -> None:
+        """设置备份状态"""
+        if not isinstance(value, bool):
+            raise TypeError(f"has_backup 的类型必须为 {bool}")
+        self._has_backup = value
 
     @property
     def configs(self) -> Dict[str, Any]:

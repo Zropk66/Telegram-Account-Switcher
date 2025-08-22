@@ -8,16 +8,11 @@
 ## WARNING! All changes made in this file will be lost when recompiling UI file!
 ################################################################################
 
-from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,
-    QMetaObject, QObject, QPoint, QRect,
-    QSize, QTime, QUrl, Qt)
-from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
-    QFont, QFontDatabase, QGradient, QIcon,
-    QImage, QKeySequence, QLinearGradient, QPainter,
-    QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QApplication, QCheckBox, QLabel, QLineEdit,
-    QListWidget, QListWidgetItem, QMainWindow, QPushButton,
-    QSizePolicy, QWidget)
+from PySide6.QtCore import (QCoreApplication, QMetaObject, QRect,
+                            QSize)
+from PySide6.QtWidgets import (QCheckBox, QLabel, QLineEdit,
+                               QListWidget, QPushButton,
+                               QSizePolicy, QWidget)
 
 class Ui_setting(object):
     def setupUi(self, setting):
@@ -76,6 +71,9 @@ class Ui_setting(object):
         self.log_output = QCheckBox(self.centralwidget)
         self.log_output.setObjectName(u"log_output")
         self.log_output.setGeometry(QRect(360, 180, 82, 20))
+        self.version_label = QLabel(self.centralwidget)
+        self.version_label.setObjectName(u"version_label")
+        self.version_label.setGeometry(QRect(10, 230, 211, 16))
         setting.setCentralWidget(self.centralwidget)
 
         self.retranslateUi(setting)
@@ -124,5 +122,6 @@ class Ui_setting(object):
         self.log_output.setToolTip(QCoreApplication.translate("setting", u"\u63a7\u5236\u65e5\u5fd7\u662f\u5426\u5199\u5165\u5230\u6587\u4ef6", None))
 #endif // QT_CONFIG(tooltip)
         self.log_output.setText(QCoreApplication.translate("setting", u"\u65e5\u5fd7\u8f93\u51fa", None))
+        self.version_label.setText("")
     # retranslateUi
 

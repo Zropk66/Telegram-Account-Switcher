@@ -1,15 +1,14 @@
 # -*- coding: utf-8 -*-
 # @Time : 2025/5/7 13:12
 # @Author : Zropk
+import threading
 import json
 import sys
-import threading
 
-from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtCore import QObject, Signal
+from contextlib import suppress
 from loguru import logger
-
-from src.utils.config_manage import ConfigManage
 
 
 class LogSignals(QObject):
@@ -73,7 +72,8 @@ class Logger:
                     cls._instance._init_logger()
         return cls._instance
 
-    def _init_logger(self):
+    @staticmethod
+    def _init_logger():
         """初始化"""
         logger.remove()
 
@@ -92,7 +92,8 @@ class Logger:
             colorize=True
         )
 
-        try:
+        with suppress(json.JSONDecodeError, IOError):
+            from src.modules.config_manager import ConfigManage
             config_file = ConfigManage().config_file
             if config_file.exists():
                 with open(config_file, 'r', encoding='utf-8') as f:
@@ -104,12 +105,11 @@ class Logger:
                             format=log_format,
                             level="DEBUG"
                         )
-        except (json.JSONDecodeError, IOError):
-            pass
 
         setup_popup_handler()
 
-    def log(self, level, message, popup=False, **kwargs):
+    @staticmethod
+    def log(level, message, popup=False, **kwargs):
         """通用日志记录方法"""
 
         exc = kwargs.pop('exc', None)

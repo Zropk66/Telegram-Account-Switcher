@@ -1,28 +1,27 @@
 # -*- coding: utf-8 -*-
 # @Time : 2025/5/7 13:12
 # @Author : Zropk
-import os
-import sys
 import winreg
-from pathlib import Path
-from threading import RLock
+import sys
+import os
 
-from PySide6.QtCore import QObject, QEvent, Qt, QRunnable, QThreadPool, Signal, Slot, \
-    QRegularExpression
-from PySide6.QtGui import QRegularExpressionValidator, QValidator
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QFileDialog, QListWidgetItem, QStyledItemDelegate, QLineEdit, \
     QApplication
+from PySide6.QtCore import QObject, QEvent, Qt, QRunnable, QThreadPool, Signal, Slot, \
+    QRegularExpression
+from PySide6.QtGui import QRegularExpressionValidator, QValidator, QCloseEvent
+
+from threading import RLock
+from pathlib import Path
 
 from src.ui.ui_settings import Ui_setting
-from src.utils import Logger, ConfigManage
-from src.utils.exceptions import TASException
-from src.utils import TASConfigException
+from src.modules import TASConfigException, TASException, Logger, ConfigManage
 
 
-def open_settings_window():
+def open_settings_window(version):
     """打开设置窗口"""
     app = QApplication.instance() or QApplication(sys.argv)
-    widget = SettingsWindow()
+    widget = SettingsWindow(version)
     widget.show()
     sys.exit(app.exec())
 
@@ -94,7 +93,7 @@ class DoubleClickFilter(QObject):
 
 
 class SettingsWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, version):
         super().__init__()
         self.ui = Ui_setting()
         self.ui.setupUi(self)
@@ -105,26 +104,29 @@ class SettingsWindow(QMainWindow):
 
         self.lock = RLock()
 
+        self.ui.version_label.setText(f'TAS v{version}')
+
         self.client_edit_double_click_filter = DoubleClickFilter(self.client_edit_double_click_event)
         self.ui.client_edit.installEventFilter(self.client_edit_double_click_filter)
         self.ui.client_edit.setText(self.current_configs.get('client'))
-        self.ui.client_edit.textChanged.connect(lambda text: self.update_current_config('client', text))
+        self.ui.client_edit.textChanged.connect(self.client_change_event)
 
         self.path_edit_double_click_filter = DoubleClickFilter(self.path_edit_double_click_event)
         self.ui.path_edit.installEventFilter(self.path_edit_double_click_filter)
         self.ui.path_edit.setText(self.current_configs.get('path'))
-        self.ui.path_edit.textChanged.connect(lambda text: self.update_current_config('path', text))
+        self.ui.path_edit.textChanged.connect(self.path_change_event)
 
         self.ui.search_client_button.clicked.connect(self.search_client_task)
 
         self.ui.default_edit.setText(self.current_configs.get('default'))
-        self.ui.default_edit.textChanged.connect(self.default_changed)
+        self.ui.default_edit.textChanged.connect(self.default_change_event)
         self.ui.default_edit.setValidator(NonEmptyValidator())
 
         self.ui.tags_widget.addItems(self.current_configs.get('tags'))
-        self.ui.tags_widget.itemChanged.connect(self.tags_changed)
+        self.ui.tags_widget.itemChanged.connect(self.tags_change_event)
         self.ui.tags_widget.itemDoubleClicked.connect(self.edit_item_event)
         self.ui.tags_widget.setItemDelegate(NonEmptyDelegate())
+
         self.ui.add_button.clicked.connect(self.add_item_event)
         self.ui.del_button.clicked.connect(self.del_item_event)
 
@@ -132,18 +134,19 @@ class SettingsWindow(QMainWindow):
             item = self.ui.tags_widget.item(i)
             item.setFlags(item.flags() | Qt.ItemIsEditable)
 
-        self.ui.log_output.setChecked(self.controller.config.log_output)
-        self.ui.log_output.stateChanged.connect(self.log_output_changed)
+        self.ui.log_output.setChecked(self.current_configs.get('log_output'))
+        self.ui.log_output.stateChanged.connect(self.log_output_change_event)
 
         self.ui.finish_button.clicked.connect(self.save_config_event)
 
-    def closeEvent(self, event):
+    def closeEvent(self, event: QCloseEvent) -> None:
         if self.controller.load_settings() != self.current_configs:
-            reply = QMessageBox.question(self, 'Tips',
-                                         "配置项未保存，你确定要退出程序吗？",
-                                         QMessageBox.Yes | QMessageBox.No,
-                                         QMessageBox.No)
-
+            reply = QMessageBox.question(
+                self,
+                'Tips',
+                "配置已更改但未保存，你确定要退出程序吗？",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No)
             if reply == QMessageBox.Yes:
                 event.accept()
             else:
@@ -163,8 +166,8 @@ class SettingsWindow(QMainWindow):
                     path = os.path.dirname(full_path)
                     self.ui.client_edit.setText(client)
                     self.ui.path_edit.setText(path)
-                    self.current_configs['client'] = client
-                    self.current_configs['path'] = path
+                    self.update_current_config('client', client)
+                    self.update_current_config('path', path)
                     return f"有效客户端 -> {full_path}"
             except (FileNotFoundError, AttributeError) as e:
                 raise TASException('无法找到客户端，请确保协议关联已安装并注册') from e
@@ -201,6 +204,18 @@ class SettingsWindow(QMainWindow):
         except AttributeError:
             raise
 
+    def update_current_tags(self):
+        new_tags = []
+        count = self.ui.tags_widget.count()
+        for row in range(count):
+            item = self.ui.tags_widget.item(row)
+            new_tags.append(item.text())
+        self.update_current_config('tags', new_tags)
+
+    def update_current_config(self, key, value):
+        self.current_configs[key] = value
+
+    @Slot()
     def save_config_event(self):
         try:
             self.controller.save_settings(self.current_configs)
@@ -209,14 +224,7 @@ class SettingsWindow(QMainWindow):
         except TASConfigException as e:
             self.logger.exception(f"配置保存失败", e)
 
-    def update_current_tags(self):
-        new_tags = []
-        count = self.ui.tags_widget.count()
-        for row in range(count):
-            item = self.ui.tags_widget.item(row)
-            new_tags.append(item.text())
-        self.current_configs['tags'] = new_tags
-
+    @Slot()
     def add_item_event(self):
         item = QListWidgetItem("New argument")
         item.setFlags(item.flags() | Qt.ItemIsEditable)
@@ -224,6 +232,7 @@ class SettingsWindow(QMainWindow):
         self.ui.tags_widget.editItem(item)
         self.update_current_tags()
 
+    @Slot()
     def del_item_event(self):
         selected_item = self.ui.tags_widget.currentItem()
         if selected_item:
@@ -231,38 +240,49 @@ class SettingsWindow(QMainWindow):
             self.ui.tags_widget.takeItem(row)
             self.update_current_tags()
 
+    @Slot()
     def edit_item_event(self, item):
         self.ui.tags_widget.editItem(item)
-
-    def update_current_config(self, key, value):
-        self.current_configs[key] = value
 
     @Slot()
     def search_client_task(self):
         runner = TaskRunner(self._search_client)
-        runner.signals.finished.connect(self.finished_signal_even)
-        runner.signals.error.connect(self.error_signal_even)
+        runner.signals.finished.connect(self.finished_signal_event)
+        runner.signals.error.connect(self.error_signal_event)
         self.thread_pool.start(runner)
 
     @Slot()
-    def finished_signal_even(self, result):
+    def finished_signal_event(self, result):
         self.logger.info(result)
 
     @Slot()
-    def error_signal_even(self, e):
+    def error_signal_event(self, e):
         self.logger.error(e.message, popup=True)
 
     @Slot()
-    def default_changed(self, text):
-        self.current_configs['default'] = text
+    def client_change_event(self, text):
+        self.update_current_config('client', text)
 
     @Slot()
-    def tags_changed(self):
-        self.current_configs['tags'] = [self.ui.tags_widget.item(i).text() for i in range(self.ui.tags_widget.count())]
+    def path_change_event(self, text):
+        self.update_current_config('path', text)
 
     @Slot()
-    def log_output_changed(self, state):
-        self.current_configs['log_output'] = bool(state)
+    def default_change_event(self, text):
+        self.update_current_config('default', text)
+
+    @Slot()
+    def log_output_change_event(self, state):
+        self.update_current_config('log_output', bool(state))
+
+    @Slot()
+    def tags_change_event(self):
+        self.update_current_config(
+            'tags',
+            [
+                self.ui.tags_widget.item(i).text() for i in range(self.ui.tags_widget.count())
+            ]
+        )
 
     @Slot()
     def client_edit_double_click_event(self):
@@ -273,11 +293,12 @@ class SettingsWindow(QMainWindow):
             path = os.path.dirname(user_select)
             self.ui.client_edit.setText(client)
             self.ui.path_edit.setText(path)
-            self.current_configs['client'] = client
+            self.update_current_config('client', client)
 
     @Slot()
     def path_edit_double_click_event(self):
         """路径选择事件"""
-        path = QFileDialog.getExistingDirectory(self, "选择客户端路径", "")
-        if path: self.ui.path_edit.setText(path)
-        self.current_configs['path'] = path
+        user_select = QFileDialog.getExistingDirectory(self, "选择客户端路径", "")
+        if user_select:
+            self.ui.path_edit.setText(user_select)
+            self.update_current_config('path', user_select)

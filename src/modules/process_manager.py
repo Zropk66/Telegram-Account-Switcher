@@ -1,33 +1,61 @@
 # -*- coding: utf-8 -*-
 # @Time : 2025/5/7 13:12
 # @Author : Zropk
-import asyncio
+import subprocess
+import time
 from contextlib import suppress
+from pathlib import Path
 from typing import Callable
-
+import asyncio
 import psutil
 
-from src.utils.exceptions import TASException
-from src.utils.logger import Logger
+from src.modules import ConfigManage
+from src.modules.exceptions import TASException
+from src.modules.logger import Logger
+
+class ProcessManager:
+    def __init__(self):
+        pass
+
+    @staticmethod
+    def start_process(configs: ConfigManage):
+        """客户端启动函数"""
+        try:
+            subprocess.Popen(
+                [Path(configs.path) / configs.client],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                shell=True,
+                start_new_session=True
+            )
+            while True:
+                if configs.process_status:
+                    break
+                time.sleep(0.1)
+            return True
+        except FileNotFoundError:
+            return False
 
 
-def try_kill_process(client: str):
-    if not isinstance(client, str):
-        raise TypeError(f"{client} 必须为 {str}, 但实际为 {type(client)}")
-    for process in psutil.process_iter(['name']):
-        process_name = process.info['name']
-        if client == process_name:
-            try:
-                process.terminate()
-                return True
-            except psutil.NoSuchProcess:
-                return True
-            except (PermissionError, psutil.AccessDenied) as e:
-                raise TASException(f'终止进程 {process_name} 的操作失败') from e
-    return False
+    @staticmethod
+    def kill_process(client: str):
+        if not isinstance(client, str):
+            raise TypeError(f"{client} 必须为 {str}, 但实际为 {type(client)}")
+        for process in psutil.process_iter(['name']):
+            process_name = process.info['name']
+            if client == process_name:
+                try:
+                    process.terminate()
+                    return True
+                except psutil.NoSuchProcess:
+                    return True
+                except (PermissionError, psutil.AccessDenied) as e:
+                    raise TASException(f'终止进程 {process_name} 的操作失败') from e
+        return False
 
 
-class ProcessWatcher:
+class ProcessMonitor:
     def __init__(self, process_name: str, *, check_interval: float = 1.0, ):
         self.process_name = process_name
         self._callbacks = []
@@ -36,13 +64,13 @@ class ProcessWatcher:
         self.logger = Logger()
         self.last_PID = None
 
-    def add_callback(self, callback):
+    def add_callback(self, callback: Callable):
         """添加状态变化回调函数"""
         if not callable(callback):
             raise TypeError("回调函数必须可调用")
         self._callbacks.append(callback)
 
-    def remove_callback(self, callback: Callable[[bool], None]):
+    def remove_callback(self, callback: Callable):
         """移除回调函数"""
         with suppress(ValueError):
             self._callbacks.remove(callback)
@@ -91,12 +119,10 @@ class ProcessWatcher:
     def _status_checker(self, process_name: str) -> bool:
         """进程状态检查器"""
         try:
-            try:
+            with suppress(psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 process = psutil.Process(self.last_PID)
                 if process and process.name() == process_name:
                     return True
-            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                pass
 
             for proc in psutil.process_iter(['name', 'pid']):
                 try:
