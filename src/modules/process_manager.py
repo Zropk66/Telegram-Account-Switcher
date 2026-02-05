@@ -13,50 +13,83 @@ from src.modules import ConfigManage
 from src.modules.exceptions import TASException
 from src.modules.logger import Logger
 
-class ProcessManager:
-    def __init__(self):
-        pass
 
+class ProcessManager:
     @staticmethod
     def start_process(configs: ConfigManage):
         """客户端启动函数"""
         try:
+            full_path = Path(configs.path) / configs.client
+
             subprocess.Popen(
-                [Path(configs.path) / configs.client],
+                args=str(full_path),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 stdin=subprocess.DEVNULL,
-                shell=True,
-                start_new_session=True
+                shell=False,
+                start_new_session=True,
             )
-            while True:
-                if configs.process_status:
-                    break
-                time.sleep(0.1)
-            return True
-        except FileNotFoundError:
-            return False
 
+            max_time = 15
+            interval = 0.2
+            start_time = time.monotonic()
+
+            while not configs.process_status:
+                if time.monotonic() - start_time > max_time:
+                    return False
+                time.sleep(interval)
+
+            return configs.process_status
+
+        except (FileNotFoundError, TypeError, PermissionError):
+            return False
 
     @staticmethod
     def kill_process(client: str):
+        """终止所有匹配的进程"""
         if not isinstance(client, str):
             raise TypeError(f"{client} 必须为 {str}, 但实际为 {type(client)}")
+
+        killed = False
+        processes_to_kill = []
+        access_denied = False
+
         for process in psutil.process_iter(['name']):
-            process_name = process.info['name']
-            if client == process_name:
+            if client == process.info['name']:
+                processes_to_kill.append(process)
+
+        if not processes_to_kill:
+            return False
+
+        for process in processes_to_kill:
+            try:
+                process.terminate()
+                killed = True
+            except psutil.AccessDenied:
+                access_denied = True
+            except psutil.NoSuchProcess:
+                continue
+
+        gone, alive = psutil.wait_procs(processes_to_kill, timeout=3)
+        if alive:
+            for p in alive:
                 try:
-                    process.terminate()
-                    return True
+                    p.kill()
+                except psutil.AccessDenied:
+                    access_denied = True
                 except psutil.NoSuchProcess:
-                    return True
-                except (PermissionError, psutil.AccessDenied) as e:
-                    raise TASException(f'终止进程 {process_name} 的操作失败') from e
-        return False
+                    pass
+
+        if access_denied and not killed:
+            raise TASException(
+                f"无法终止进程 {client}。权限不足，请尝试以管理员身份运行程序。"
+            )
+
+        return killed
 
 
 class ProcessMonitor:
-    def __init__(self, process_name: str, *, check_interval: float = 1.0, ):
+    def __init__(self, process_name: str, *, check_interval: float = 0.5):
         self.process_name = process_name
         self._callbacks = []
         self.check_interval = check_interval
@@ -129,7 +162,11 @@ class ProcessMonitor:
                     if process_name in proc.info['name']:
                         self.last_PID = proc.pid
                         return True
-                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                except (
+                        psutil.NoSuchProcess,
+                        psutil.AccessDenied,
+                        psutil.ZombieProcess,
+                ):
                     continue
             return False
         except Exception as e:

@@ -20,10 +20,12 @@ from src.modules import TASConfigException, TASException, Logger, ConfigManage
 
 def open_settings_window(version):
     """打开设置窗口"""
-    app = QApplication.instance() or QApplication(sys.argv)
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication(sys.argv)
     widget = SettingsWindow(version)
     widget.show()
-    sys.exit(app.exec())
+    return app.exec()
 
 
 class SettingsController:

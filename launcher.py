@@ -1,9 +1,14 @@
 # -*- coding: utf-8 -*-
 # @Time : 2025/5/7 13:12
 # @Author : Zropk
-import sys
+# from os import mkdir
+
 
 from src.main import main
 
-if __name__ == '__main__':
-    sys.exit(main())
+main()
+
+# if __name__ == '__main__':
+#     mkdir("program_run")
+#     main()
+

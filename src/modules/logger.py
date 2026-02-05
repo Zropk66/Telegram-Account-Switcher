@@ -4,6 +4,7 @@
 import threading
 import json
 import sys
+from pathlib import Path
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import QObject, Signal
@@ -20,7 +21,9 @@ log_signals = LogSignals()
 
 def show_message(title, message, level):
     """显示弹窗"""
-    app = QApplication.instance() or QApplication(sys.argv)
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication(sys.argv)
     msg_box = QMessageBox()
     msg_box.setWindowTitle(title.upper())
     msg_box.setText(message)
@@ -32,28 +35,32 @@ def setup_popup_handler():
     """弹窗处理器"""
 
     def popup_sink(message):
-        extra = message.record.get('extra', {})
-        if not extra.get('popup', False):
+        extra = message.record.get("extra", {})
+        if not extra.get("popup", False):
             return
 
         level_map = {
-            'DEBUG': QMessageBox.Information,
-            'INFO': QMessageBox.Information,
-            'WARNING': QMessageBox.Warning,
-            'ERROR': QMessageBox.Critical,
-            'CRITICAL': QMessageBox.Critical,
-            'EXCEPTION': QMessageBox.Critical,
+            "DEBUG": QMessageBox.Icon.Information,
+            "INFO": QMessageBox.Icon.Information,
+            "WARNING": QMessageBox.Icon.Warning,
+            "ERROR": QMessageBox.Icon.Critical,
+            "CRITICAL": QMessageBox.Icon.Critical,
+            "EXCEPTION": QMessageBox.Icon.Critical,
         }
 
-        level_icon = level_map.get(message.record['level'].name, QMessageBox.Information)
-        full_message = message.record['message']
+        level_icon = level_map.get(
+            message.record["level"].name, QMessageBox.Icon.Information
+        )
+        full_message = message.record["message"]
 
-        if exception := message.record.get('exception', None):
+        if exception := message.record.get("exception", None):
             full_message += f"\n\n{exception}"
 
-        log_signals.show_popup.emit(message.record['level'].name, full_message, level_icon)
+        log_signals.show_popup.emit(
+            message.record["level"].name, full_message, level_icon
+        )
 
-    logger.add(popup_sink, filter=lambda record: record['extra'].get('popup', False))
+    logger.add(popup_sink, filter=lambda record: record["extra"].get("popup", False))
 
 
 log_signals.show_popup.connect(show_message)
@@ -61,6 +68,7 @@ log_signals.show_popup.connect(show_message)
 
 class Logger:
     """日志记录器"""
+
     _instance = None
     _lock = threading.Lock()
 
@@ -84,26 +92,23 @@ class Logger:
             "<level>{level: <8}</level> | "
             "<level>{message}</level>"
         )
-
-        logger.add(
-            sys.stderr,
-            format=log_format,
-            level="DEBUG",
-            colorize=True
-        )
+        with suppress(TypeError):
+            logger.add(sys.stderr, format=log_format, level="DEBUG", colorize=True)
 
         with suppress(json.JSONDecodeError, IOError):
             from src.modules.config_manager import ConfigManage
+
             config_file = ConfigManage().config_file
             if config_file.exists():
-                with open(config_file, 'r', encoding='utf-8') as f:
-                    if json.load(f).get('log_output', False):
+                with open(config_file, "r", encoding="utf-8") as f:
+                    if json.load(f).get("log_output", False):
+                        # log_file_path = os.getcwd()
                         logger.add(
-                            "TAS.log",
+                            'TAS.log',
                             rotation="10 MB",
                             encoding="utf-8",
                             format=log_format,
-                            level="DEBUG"
+                            level="DEBUG",
                         )
 
         setup_popup_handler()
@@ -112,24 +117,26 @@ class Logger:
     def log(level, message, popup=False, **kwargs):
         """通用日志记录方法"""
 
-        exc = kwargs.pop('exc', None)
-        logger.opt(exception=exc, depth=1).bind(popup=popup, **kwargs).log(level, message)
+        exc = kwargs.pop("exc", None)
+        logger.opt(exception=exc, depth=1).bind(popup=popup, **kwargs).log(
+            level, message
+        )
 
     def debug(self, message, popup=False, **kwargs):
-        self.log('DEBUG', message, popup, **kwargs)
+        self.log("DEBUG", message, popup, **kwargs)
 
     def info(self, message, popup=False, **kwargs):
-        self.log('INFO', message, popup, **kwargs)
+        self.log("INFO", message, popup, **kwargs)
 
     def warning(self, message, popup=False, **kwargs):
-        self.log('WARNING', message, popup, **kwargs)
+        self.log("WARNING", message, popup, **kwargs)
 
     def error(self, message, popup=False, **kwargs):
-        self.log('ERROR', message, popup, **kwargs)
+        self.log("ERROR", message, popup, **kwargs)
 
     def critical(self, message, popup=False, **kwargs):
-        self.log('CRITICAL', message, popup, **kwargs)
+        self.log("CRITICAL", message, popup, **kwargs)
 
     def exception(self, message, exc, popup=False, **kwargs):
         kwargs["exc"] = exc
-        self.log('EXCEPTION', message, popup, **kwargs)
+        self.log("EXCEPTION", message, popup, **kwargs)

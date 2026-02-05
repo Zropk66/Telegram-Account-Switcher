@@ -25,7 +25,9 @@ class AESCipher:
         elif isinstance(s, bytes) or isinstance(s, bytearray):
             return bytes(s)
         else:
-            raise TASCipherException(f"密钥类型 {type(s)} 不受支持. 当前仅支持[ {str}, {bytes}, {bytearray} ].")
+            raise TASCipherException(
+                f'密钥类型 {type(s)} 不受支持. 当前仅支持[ {str}, {bytes}, {bytearray} ].'
+            )
 
     def _handle_cipher(self, path: str | Path, method: str, save: bool):
         """加解密"""
@@ -54,16 +56,17 @@ class AESCipher:
         }.get(method)
         try:
             if method == self.METHOD_ENCRYPT:
-                return cipher_operator.update(self.__data_process(data, method)) + cipher_operator.finalize()
+                return (cipher_operator.update(self.__data_process(data, method))
+                        + cipher_operator.finalize()
+                        )
             elif method == self.METHOD_DECRYPT:
                 return self.__data_process(
-                    cipher_operator.update(data) + cipher_operator.finalize(),
-                    self.METHOD_DECRYPT
+                    cipher_operator.update(data) + cipher_operator.finalize(), self.METHOD_DECRYPT
                 )
             else:
-                raise TASCipherException(f"无效模式")
+                raise TASCipherException(f"无效模式: {method}")
         except ValueError as e:
-            raise TASCipherException('解密失败.') from e
+            raise TASCipherException("加解密过程出错.") from e
 
     def __data_process(self, data: bytes, method: str) -> bytes:
         """填充和去除数据"""
