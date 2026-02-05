@@ -8,6 +8,9 @@ import asyncio
 import ctypes
 import sys
 import os
+import signal
+import atexit
+from contextlib import suppress
 
 from pathlib import Path
 
@@ -19,15 +22,39 @@ from src.modules import (
     ProcessMonitor,
     ConfigManage,
     AESCipher,
+    recovery,
     Logger,
 )
 from src.ui import open_help_window, open_settings_window
 
 logger = Logger()
 TITLE = "TAS"
-VERSION = "1.2.1"
+VERSION = "1.3.0"
 CONFIG = ConfigManage()
 kernel32 = ctypes.WinDLL("kernel32")
+
+
+def log_and_exit(mark=False):
+    with suppress(Exception):
+        if mark:
+            atexit.unregister(log_and_exit)
+            recovery()
+        if not CONFIG.log_output:
+            return None
+        logger.info(f"监控时长：{CONFIG.watch_time()}.")
+        with open(os.path.join(os.getcwd(), "TAS.log"), "a", encoding="utf-8") as f:
+            f.write(f"{'-' * 20}{datetime.datetime.now()}{'-' * 20}\n")
+    return None
+
+
+def register_signal_handlers():
+    """注册信号处理器"""
+
+    def handle_interrupt(signum, frame):
+        log_and_exit(True)
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, handle_interrupt)
 
 
 def handle_global_exception(exc_type, exc_value, exc_traceback):
@@ -53,6 +80,9 @@ def parse_arguments() -> argparse.Namespace:
     action_group.add_argument(
         "--switch", "-s", type=str, metavar="tag", help="切换指定标签的账号"
     )
+    action_group.add_argument(
+        "--tag", "-t", type=str, metavar="tag", help="指定要操作的标签账户"
+    )
 
     exclusive_group = parser.add_mutually_exclusive_group()
     exclusive_group.add_argument(
@@ -76,8 +106,21 @@ def check_argument() -> str:
         args = parse_arguments()
     except argparse.ArgumentError:
         return CONFIG.default
+
     if args.password:
         CONFIG.pwd = args.password
+
+    # 处理标签指定操作
+    if args.tag:
+        if not args.encrypt and not args.decrypt:
+            logger.error("使用 --tag 时必须指定 --encrypt 或 --decrypt.", popup=True)
+            sys.exit()
+        if args.encrypt:
+            process_single_tag(args.tag, "encrypt")
+        else:
+            process_single_tag(args.tag, "decrypt")
+        sys.exit()
+
     if args.help:
         open_help_window(VERSION)
     elif args.version:
@@ -95,11 +138,39 @@ def check_argument() -> str:
     sys.exit()
 
 
+def _process_tag(tag: str, operation: str, cipher: AESCipher) -> tuple[bool, str | None]:
+    """
+    处理单个标签的加解密操作
+    返回: (是否成功, 跳过原因/错误信息)
+    """
+    tag_path = search_file_in_dirs(CONFIG.path, tag)
+    if not tag_path:
+        return False, f"标签 '{tag}' 文件缺失"
+
+    key_datas_path = Path(CONFIG.path) / tag_path / "key_datas"
+
+    if not key_datas_path.exists():
+        return False, f"标签 '{tag}' 的 key_datas 文件不存在"
+
+    try:
+        if operation == "encrypt":
+            if AESCipher.is_encrypted(key_datas_path):
+                return False, "已加密"
+            cipher.encrypt(key_datas_path)
+            return True, None
+        else:
+            cipher.decrypt(key_datas_path)
+            return True, None
+    except Exception as e:
+        return False, str(e)
+
+
 def process_tags(operation: str) -> None:
     """处理所有标签的加密/解密操作"""
     if not CONFIG.pwd:
         logger.error("未指定密钥.", popup=True)
         sys.exit()
+
     cipher = AESCipher(CONFIG.pwd)
 
     operation_name = {
@@ -108,28 +179,55 @@ def process_tags(operation: str) -> None:
     }.get(operation)
 
     processed_tags = []
+    skipped_tags = []
+    failed_tags = []
 
     for tag in CONFIG.tags:
-        path = Path(CONFIG.path) / search_file_in_dirs(CONFIG.path, tag) / "key_datas"
-        try:
-            if operation == "encrypt":
-                cipher.decrypt(path, save=False)
-            else:
-                cipher.decrypt(path)
-                processed_tags.append(tag)
-        except Exception:
-            if operation == "encrypt":
-                cipher.encrypt(path)
-                processed_tags.append(tag)
-            else:
-                logger.error(f"解密失败, 密码错误.", popup=True)
+        success, reason = _process_tag(tag, operation, cipher)
+        if success:
+            processed_tags.append(tag)
+        elif reason == "已加密":
+            skipped_tags.append(tag)
+        else:
+            failed_tags.append((tag, reason))
 
-    if not processed_tags:
+    # 生成消息
+    if failed_tags:
+        msg = f"以下标签操作失败: {failed_tags}"
+    elif skipped_tags and not processed_tags:
+        msg = f"以下标签已加密，跳过: {skipped_tags}"
+    elif not processed_tags:
         msg = f"所有标签均已{operation_name}"
     else:
         msg = f"本次{operation_name}的标签 -> {processed_tags}."
+        if skipped_tags:
+            msg += f" (已跳过: {skipped_tags})"
 
     logger.info(msg, popup=True)
+
+
+def process_single_tag(tag: str, operation: str) -> None:
+    """处理指定标签的加密/解密操作"""
+    if not CONFIG.pwd:
+        logger.error("未指定密钥.", popup=True)
+        sys.exit()
+
+    # 验证标签
+    if tag != CONFIG.default and tag not in CONFIG.tags:
+        logger.error(f"标签 '{tag}' 未注册.", popup=True)
+        sys.exit()
+
+    cipher = AESCipher(CONFIG.pwd)
+    success, reason = _process_tag(tag, operation, cipher)
+
+    if success:
+        op_name = "加密" if operation == "encrypt" else "解密"
+        logger.info(f"标签 '{tag}' {op_name}成功.", popup=True)
+    else:
+        if reason == "已加密":
+            logger.warning(f"标签 '{tag}' 已加密，跳过.", popup=True)
+        else:
+            logger.error(f"标签 '{tag}' 操作失败: {reason}", popup=True)
 
 
 def validate_tag(tag: str) -> str:
@@ -204,6 +302,8 @@ async def watcher(monitor) -> None:
 
 def initialize() -> bool:
     """初始化函数"""
+    register_signal_handlers()
+    atexit.register(log_and_exit)
     sys.excepthook = handle_global_exception
     config_file = CONFIG.config_file
     if not os.path.exists(config_file):
@@ -228,24 +328,17 @@ def initialize() -> bool:
 
 def main():
     """主函数"""
-    try:
-        if not initialize():
-            return 1
-        ProcessManager.kill_process(CONFIG.client)
+    initialize()
+    ProcessManager.kill_process(CONFIG.client)
 
-        if CONFIG.tag:
-            loop = asyncio.new_event_loop()
-            monitor = ProcessMonitor(CONFIG.client)
-            watch_thread = threading.Thread(target=run_async_in_thread, args=(loop, watcher(monitor)), daemon=True)
-            watch_thread.start()
-            logger.info("监控线程启动成功.")
+    if CONFIG.tag:
+        loop = asyncio.new_event_loop()
+        monitor = ProcessMonitor(CONFIG.client)
+        watch_thread = threading.Thread(target=run_async_in_thread, args=(loop, watcher(monitor)), daemon=True)
+        watch_thread.start()
+        logger.info("监控线程启动成功.")
 
-        AccountSwitcher().process()
-        CONFIG.complete = True
+    AccountSwitcher().process()
+    CONFIG.complete = True
 
-    finally:
-        if not CONFIG.log_output:
-            return 0
-        with open(os.path.join(os.getcwd(), "TAS.log"), "a", encoding="utf-8") as f:
-            f.write(f"{'-' * 20}{datetime.datetime.now()}{'-' * 20}")
     return 0

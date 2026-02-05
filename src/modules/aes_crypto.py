@@ -12,6 +12,9 @@ from src.modules.exceptions import TASCipherException
 
 
 class AESCipher:
+    # 标记
+    ENCRYPTION_MARKER = b'\xc7\xdfj\x1d\xd6\x88Y\xc8'
+    
     def __init__(self, key):
         self.METHOD_ENCRYPT = 'encrypt'
         self.METHOD_DECRYPT = 'decrypt'
@@ -54,6 +57,7 @@ class AESCipher:
             self.METHOD_ENCRYPT: cipher.encryptor(),
             self.METHOD_DECRYPT: cipher.decryptor()
         }.get(method)
+        
         try:
             if method == self.METHOD_ENCRYPT:
                 return (cipher_operator.update(self.__data_process(data, method))
@@ -75,7 +79,7 @@ class AESCipher:
         try:
             pad = {
                 self.METHOD_ENCRYPT: padding.PKCS7(128).padder(),
-                self.METHOD_DECRYPT: padding.PKCS7(128).unpadder()
+                self.METHOD_DECRYPT: padding.PKCS7(128).unpadder(),
             }.get(method)
             if not pad:
                 raise TASCipherException(f"无效模式")
@@ -83,10 +87,50 @@ class AESCipher:
         except ValueError as e:
             raise TASCipherException(f"数据填充/删除失败: {str(e)}") from e
 
+    @staticmethod
+    def is_encrypted(path: str | Path) -> bool:
+        """检查文件是否已加密"""
+        if not isinstance(path, Path):
+            path = Path(path)
+        if not path.exists() or not path.is_file():
+            return False
+        try:
+            with open(path, 'rb') as f:
+                header = f.read(len(AESCipher.ENCRYPTION_MARKER))
+            return header == AESCipher.ENCRYPTION_MARKER
+        except Exception:
+            return False
+
     def encrypt(self, path: str | Path, save: bool = True):
         """加密"""
-        return self._handle_cipher(path, self.METHOD_ENCRYPT, save)
+        if not isinstance(path, Path):
+            path = Path(path)
+        
+        if self.is_encrypted(path):
+            return True
+        
+        try:
+            encrypted_data =  self._cipher_process(path.read_bytes(), self.METHOD_ENCRYPT)
+            if save:
+                path.write_bytes(self.ENCRYPTION_MARKER + encrypted_data)
+            return True
+        except TASCipherException as e:
+            raise e
 
     def decrypt(self, path: str | Path, save: bool = True):
         """解密"""
-        return self._handle_cipher(path, self.METHOD_DECRYPT, save)
+        if not isinstance(path, Path):
+            path = Path(path)
+        
+        if not self.is_encrypted(path):
+            return True
+        
+        try:
+            encrypted_data = path.read_bytes()
+            data_without_marker = encrypted_data[len(self.ENCRYPTION_MARKER):]
+            decrypted_data = self._cipher_process(data_without_marker, self.METHOD_DECRYPT)
+            if save:
+                path.write_bytes(decrypted_data)
+            return True
+        except TASCipherException as e:
+            raise e

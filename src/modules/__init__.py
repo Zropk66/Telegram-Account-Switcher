@@ -16,11 +16,12 @@ from .exceptions import (
     TASCipherException
 )
 from .account.AccountSwitcher import (
-    AccountSwitcher
+    AccountSwitcher,
+    recovery
 )
 
 __all__ = [
     'ConfigManage', 'search_file_in_dirs', 'is_exists', 'ProcessManager', 'ProcessMonitor',
     'TASException', 'TASConfigException', 'format_timedelta', 'AccountSwitcher', 'Logger',
-    'AESCipher'
+    'AESCipher', 'recovery'
 ]

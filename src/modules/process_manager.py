@@ -153,13 +153,15 @@ class ProcessMonitor:
         """进程状态检查器"""
         try:
             with suppress(psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                process = psutil.Process(self.last_PID)
-                if process and process.name() == process_name:
-                    return True
+                if self.last_PID:
+                    process = psutil.Process(self.last_PID)
+                    if process.is_running() and process.name() == process_name:
+                        return True
 
             for proc in psutil.process_iter(['name', 'pid']):
                 try:
-                    if process_name in proc.info['name']:
+                    proc_name = proc.info.get('name')
+                    if proc_name == process_name:
                         self.last_PID = proc.pid
                         return True
                 except (

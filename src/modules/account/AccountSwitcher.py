@@ -64,19 +64,13 @@ class AccountSwitcher:
         except Exception as e:
             self.logger.exception("", e)
             return True
-        self.logger.info("客户端启动成功, 运行状况持续受到监控.")
-        atexit.register(recovery)
-        start_time = datetime.now()
+        self.logger.info("客户端启动成功, 状态监控器运行中...")
+        self._config.start_time = datetime.now()
         while True:
             if not self._config.process_status:
-                end_time = datetime.now()
-                self.logger.info(
-                    f"监控时长：{format_timedelta(end_time - start_time)}."
-                )
                 account_switch("restore")
                 break
             time.sleep(0.1)
-        atexit.unregister(recovery)
         return True
 
     async def __process(self, tag: str) -> bool:

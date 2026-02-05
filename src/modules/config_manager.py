@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # @Time : 2025/5/7 13:12
 # @Author : Zropk
+from datetime import datetime
 from typing import Dict, Any
 from threading import RLock, Thread
 from contextlib import suppress
@@ -10,6 +11,8 @@ import json
 import time
 import os
 import weakref
+
+from src.modules.utils import format_timedelta
 
 
 class ConfigField:
@@ -114,6 +117,7 @@ class ConfigManage:
         self._has_backup: bool = False
         self._password: str = ""
         self._tag: str = ""
+        self._start_time: datetime = datetime.now()
 
         self.__initialized = True
         self._start_auto_save()
@@ -197,13 +201,32 @@ class ConfigManage:
 
             os.replace(self._temp_file, self._config_path)
             self._config_changed = False
-        except Exception:
-            # 静默失败或记录日志，避免阻塞主流程
-            pass
+        except OSError as e:
+            with suppress(Exception):
+                from src.modules import Logger
+                Logger().error(f"保存配置文件失败: {e}")
+
+        except Exception as e:
+            with suppress(Exception):
+                from src.modules import Logger
+                Logger().error(f"保存配置时发生未知错误: {e}")
         finally:
             with suppress(OSError):
                 if self._temp_file.exists():
                     self._temp_file.unlink()
+
+    def watch_time(self) -> str:
+        return format_timedelta(datetime.now() - self.start_time)
+
+    @property
+    def start_time(self) -> datetime:
+        """获取监控开始时间"""
+        return self._start_time
+
+    @start_time.setter
+    def start_time(self, value: datetime) -> None:
+        """设置监控开始时间"""
+        self._start_time = value
 
     @property
     def tag(self) -> str:
