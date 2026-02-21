@@ -39,9 +39,33 @@ jobs:
         run: |
           uv sync --no-dev
 
-      - name: Install Nuitka, UPX
+      - name: Install Nuitka
         run: |
           uv pip install 'nuitka[onefile]'
+
+      - name: Download and setup UPX v5.1.0
+        shell: pwsh
+        run: |
+          # 使用您提供的准确链接
+          $UPX_URL = "https://github.com/upx/upx/releases/download/v5.1.0/upx-5.1.0-win64.zip"
+          $UPX_ZIP = "upx-5.1.0-win64.zip"
+          
+          $UPX_DIR = "upx-5.1.0-win64"
+      
+          Write-Host "Downloading UPX v5.1.0 from $UPX_URL ..."
+          
+          Invoke-WebRequest -Uri $UPX_URL -OutFile $UPX_ZIP
+      
+          Write-Host "Extracting $UPX_ZIP ..."
+          
+          Expand-Archive -Path $UPX_ZIP -DestinationPath . -Force
+      
+          Write-Host "Adding UPX directory to system PATH (for this job) ..."
+          $UPX_FULL_PATH = (Get-Item ".\$UPX_DIR").FullName
+          echo "$UPX_FULL_PATH" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      
+          Write-Host "UPX setup completed successfully. Version info:"
+          & ".\$UPX_DIR\upx.exe" --version
 
       - name: Generate Output Name
         id: generate-output
