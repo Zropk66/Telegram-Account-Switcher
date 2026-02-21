@@ -39,14 +39,9 @@ jobs:
         run: |
           uv sync --no-dev
 
-      - name: Install Nuitka
-        run: |
-          uv pip install 'nuitka[onefile]'
-
       - name: Download and setup UPX v5.1.0
         shell: pwsh
         run: |
-          # 使用您提供的准确链接
           $UPX_URL = "https://github.com/upx/upx/releases/download/v5.1.0/upx-5.1.0-win64.zip"
           $UPX_ZIP = "upx-5.1.0-win64.zip"
           
@@ -66,6 +61,10 @@ jobs:
       
           Write-Host "UPX setup completed successfully. Version info:"
           & ".\$UPX_DIR\upx.exe" --version
+
+      - name: Install Nuitka
+        run: |
+          uv pip install 'nuitka[onefile]'
 
       - name: Generate Output Name
         id: generate-output
@@ -92,7 +91,7 @@ jobs:
 
       - name: Compile with Nuitka
         run: |
-          uv run python -m nuitka --mingw64 --assume-yes-for-downloads --standalone --onefile --windows-console-mode=disable --plugin-enable=upx --plugin-enable=pyside6 --output-filename=${{ env.OUTPUT_NAME }} --output-dir=output --remove-output --lto=yes .\launcher.py
+          uv run python -m nuitka --mingw64 --onefile-no-compression --assume-yes-for-downloads --standalone --onefile --windows-console-mode=disable --plugin-enable=upx --plugin-enable=pyside6 --output-filename=${{ env.OUTPUT_NAME }} --output-dir=output --remove-output --lto=yes .\launcher.py
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
