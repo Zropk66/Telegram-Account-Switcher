@@ -39,13 +39,13 @@ jobs:
         run: |
           uv sync --no-dev
 
-      - name: Install Nuitka
+      - name: Install Nuitka, UPX
         run: |
           uv pip install 'nuitka[onefile]'
 
       - name: Install UPX
         run: |
-          choco install upx --no-progress
+          uv pip install upx
 
       - name: Generate Output Name
         id: generate-output
@@ -72,7 +72,7 @@ jobs:
 
       - name: Compile with Nuitka
         run: |
-          uv run python -m nuitka --mingw64 --upx --assume-yes-for-downloads --standalone --onefile --windows-console-mode=disable --plugin-enable=pyside6 --output-filename=${{ env.OUTPUT_NAME }} --output-dir=output --remove-output --lto=yes .\launcher.py
+          uv run python -m nuitka --mingw64 --assume-yes-for-downloads --standalone --onefile --windows-console-mode=disable --plugin-enable=upx --plugin-enable=pyside6 --output-filename=${{ env.OUTPUT_NAME }} --output-dir=output --remove-output --lto=yes .\launcher.py
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
