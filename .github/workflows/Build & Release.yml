@@ -68,7 +68,7 @@ jobs:
 
       - name: Compile with Nuitka
         run: |
-          uv run python -m nuitka --mingw64 --standalone --onefile --windows-console-mode=disable --plugin-enable=pyside6 --output-filename=${{ env.OUTPUT_NAME }} --output-dir=output --remove-output --lto=yes .\launcher.py
+          uv run python -m nuitka --mingw64 --assume-yes-for-downloads --standalone --onefile --windows-console-mode=disable --plugin-enable=pyside6 --output-filename=${{ env.OUTPUT_NAME }} --output-dir=output --remove-output --lto=yes .\launcher.py
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
