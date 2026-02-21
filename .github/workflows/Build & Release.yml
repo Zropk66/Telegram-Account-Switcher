@@ -43,10 +43,6 @@ jobs:
         run: |
           uv pip install 'nuitka[onefile]'
 
-      - name: Install UPX
-        run: |
-          uv pip install upx
-
       - name: Generate Output Name
         id: generate-output
         shell: powershell
