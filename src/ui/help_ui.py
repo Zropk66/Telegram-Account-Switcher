@@ -31,7 +31,9 @@ class HelpWindow(QWidget):
             ("--switch", "-s", "切换指定标签的账号"),
             ("--password", "-p", "指定解密密钥"),
             ("--encrypt", "-e", "立即加密文件"),
-            ("--decrypt", "-d", "立即解密文件")
+            ("--decrypt", "-d", "立即解密文件"),
+            ("--key-login", "-k", "强制使用key绕过目录锁定直接登录"),
+            ("--tag", "-t", "指定操作特定标签账户")
         ]
         self.ui.version_label.setText(f'TAS v{self.version}')
         self.ui.args_widget.setRowCount(len(self.help_datas))

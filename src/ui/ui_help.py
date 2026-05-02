@@ -64,13 +64,13 @@ class Ui_help(object):
     def retranslateUi(self, help):
         help.setWindowTitle(QCoreApplication.translate("help", u"\u5e2e\u52a9\u6587\u6863", None))
         ___qtablewidgetitem = self.args_widget.horizontalHeaderItem(0)
-        ___qtablewidgetitem.setText(QCoreApplication.translate("help", u"\u5e8f\u53f7", None));
+        ___qtablewidgetitem.setText(QCoreApplication.translate("help", u"\u5e8f\u53f7", None))
         ___qtablewidgetitem1 = self.args_widget.horizontalHeaderItem(1)
-        ___qtablewidgetitem1.setText(QCoreApplication.translate("help", u"\u957f\u53c2\u6570", None));
+        ___qtablewidgetitem1.setText(QCoreApplication.translate("help", u"\u957f\u53c2\u6570", None))
         ___qtablewidgetitem2 = self.args_widget.horizontalHeaderItem(2)
-        ___qtablewidgetitem2.setText(QCoreApplication.translate("help", u"\u77ed\u53c2\u6570", None));
+        ___qtablewidgetitem2.setText(QCoreApplication.translate("help", u"\u77ed\u53c2\u6570", None))
         ___qtablewidgetitem3 = self.args_widget.horizontalHeaderItem(3)
-        ___qtablewidgetitem3.setText(QCoreApplication.translate("help", u"\u8bf4\u660e", None));
+        ___qtablewidgetitem3.setText(QCoreApplication.translate("help", u"\u8bf4\u660e", None))
         self.title_label.setText(QCoreApplication.translate("help", u"\u547d\u4ee4\u884c\u53c2\u6570\u8bf4\u660e", None))
         self.tips_label.setText(QCoreApplication.translate("help", u"\u6ce8\uff1a\u5728\u547d\u4ee4\u884c\u4e2d\u4f7f\u7528\u4e0a\u8ff0\u9009\u9879\u64cd\u4f5c\u7a0b\u5e8f.", None))
         self.version_label.setText("")

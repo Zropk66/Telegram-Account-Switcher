@@ -2,32 +2,47 @@
 # @File ： utils.py
 # @Time : 2025/8/6 00:02
 # @Author : Zropk
-import os
+from pathlib import Path
 
 
-def search_file_in_dirs(base_path: str, target_file: str):
-    """在文件夹中查找目标文件并返回具体路径"""
-    if not base_path or not target_file or not os.path.isdir(base_path):
-        return ""
-
+def search_file_in_dirs(directory, tag_name):
+    """搜索目录下包含 tas_tag 标识的账户文件夹"""
     try:
-        for entry in os.scandir(base_path):
+        base_dir = Path(directory)
+        if not base_dir.is_dir():
+            return None
+
+        for entry in base_dir.iterdir():
             if entry.is_dir():
-                file_path = os.path.join(entry.path, target_file)
-                if os.path.isfile(file_path):
-                    return entry.name
-    except (PermissionError, OSError):
-        pass
-    return ""
+                tas_tag_file = entry / "tas_tag"
+                if tas_tag_file.is_file():
+                    try:
+                        if tas_tag_file.read_text(encoding="utf-8").strip() == tag_name:
+                            return entry.name
+                    except Exception:
+                        pass
+        return None
+    except Exception as e:
+        import logging
+        logging.error(f"Search for tag {tag_name} failed: {e}")
+        return None
 
 
-def is_exists(base_path: str, target_file: str):
-    """判断文件夹中是否存在目标文件"""
-    if not base_path or not target_file:
+def is_exists(base_path: str, target_tag: str) -> bool:
+    """检查文件夹是否匹配目标标签"""
+    if not base_path or not target_tag:
         return False
     try:
-        return os.path.exists(os.path.join(base_path, target_file))
-    except (FileNotFoundError, PermissionError, TypeError, OSError):
+        folder = Path(base_path)
+        tas_tag_file = folder / "tas_tag"
+        if tas_tag_file.is_file():
+            try:
+                if tas_tag_file.read_text(encoding="utf-8").strip() == target_tag:
+                    return True
+            except Exception:
+                pass
+        return False
+    except (PermissionError, OSError):
         return False
 
 

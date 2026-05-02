@@ -2,61 +2,115 @@
 # @File ： account_operations.py
 # @Time : 2025/8/5 23:45
 # @Author : Zropk
-import os
-import random
+import secrets
 import shutil
+import sys
 import time
 from contextlib import suppress
 from pathlib import Path
 from typing import Literal
 
-from src.modules.utils import search_file_in_dirs
-from src.modules.process_manager import ProcessManager
-from src.modules.aes_crypto import AESCipher
+from PySide6.QtWidgets import QMessageBox, QApplication
+
 from src.modules.config_manager import ConfigManage
+from src.modules.crypto import AESCipher
 from src.modules.exceptions import TASException, TASCipherException
+from src.modules.utils import search_file_in_dirs
 
 
-def account_switch(
-        method: Literal["restore", "target"],
-        tag_in_folder: bool = False,
-        max_retries: int = 5,
-):
-    """控制账户的切换与还原"""
+def restore_default(max_retries: int = 5) -> bool:
+    """恢复默认账户"""
+    return _account_switch("restore", max_retries)
+
+
+def switch_to_tag(max_retries: int = 5) -> bool:
+    """切换至目标标签"""
+    return _account_switch("target", max_retries)
+
+
+def _account_switch(method: Literal["restore", "target"], max_retries: int = 5):
+    """底层切换逻辑实现"""
     configs = ConfigManage()
     cipher = AESCipher(configs.pwd)
+    target_tag = None
 
     for attempt in range(max_retries):
         try:
-            if tag_in_folder:
-                with suppress(TASCipherException):
-                    tag_path = Path(configs.path) / search_file_in_dirs(
-                        configs.path, configs.tag
-                    )
-                    cipher.decrypt(tag_path / "key_datas")
+            target_tag = configs.default if method == "restore" else configs.tag
+            use_key_login = getattr(configs, "force_key_login", False)
+
+            tag_folder = search_file_in_dirs(configs.path, target_tag)
+
+            if not use_key_login:
+                if not tag_folder:
+                    if configs.has_complete_keys(target_tag):
+                        QApplication.instance() or QApplication(sys.argv)
+                        reply = QMessageBox.question(
+                            None,
+                            "账户切换确认",
+                            f"未找到标签 '{target_tag}' 的文件夹，是否使用密钥重构登录？",
+                            QMessageBox.Yes | QMessageBox.No
+                        )
+                        if reply == QMessageBox.Yes:
+                            use_key_login = True
+                        else:
+                            return False
+                    else:
+                        if attempt == max_retries - 1:
+                            raise TASException(f"未找到标签 '{target_tag}' 的文件或密钥")
+
+            if use_key_login:
+                if configs.login_with_keys(target_tag, str(Path(configs.path) / "tdata")):
                     configs.decrypted = True
-                    return ProcessManager.start_process(configs)
+                    return True
+                return False
 
-            method_func = {
-                "restore": switch_to_default,
-                "target": switch_to_target,
-            }.get(method)
+            if tag_folder == "tdata":
+                try:
+                    cipher.decrypt(Path(configs.path) / "tdata" / "key_datas")
+                    configs.decrypted = True
+                    return True
+                except TASCipherException as e:
+                    from src.modules import Logger
+                    if configs.has_complete_keys(target_tag):
+                        Logger().warning(f"")
+                        QApplication.instance() or QApplication(sys.argv)
+                        reply = QMessageBox.question(
+                            None,
+                            "提示",
+                            f"检测到当前账户 '{target_tag}' 密钥损坏，是否尝试从备份库修复?",
+                            QMessageBox.Yes | QMessageBox.No
+                        )
+                        if reply == QMessageBox.Yes:
+                            if configs.login_with_keys(target_tag, str(Path(configs.path) / "tdata")):
+                                with suppress(TASCipherException):
+                                    cipher.decrypt(Path(configs.path) / "tdata" / "key_datas")
+                                configs.decrypted = True
+                                return True
+                        else:
+                            return False
 
+
+                    Logger().warning(f"解密当前账户失败: {e}. 请检查密码是否正确。", popup=True)
+                    return False
+
+            method_func = {"restore": switch_to_default, "target": switch_to_target}.get(method)
             if not method_func:
                 raise TASException(f"模式 '{method}' 未定义")
 
-            # 每次重试生成新的临时文件夹名称
-            temp = f"tdata-{''.join(random.sample('ABCDEFGH', 8))}"
+            temp = f"tdata-{''.join(secrets.token_hex(4))}"
             if method_func(configs, cipher, temp):
                 return True
 
             time.sleep(1)
 
+        except TASCipherException as e:
+            from src.modules import Logger
+            Logger().error(f"无法解密账户 '{target_tag}': {e}. 切换中止。", popup=True)
+            return False
         except PermissionError:
             if attempt == max_retries - 1:
-                raise TASException(
-                    "权限不足，账户切换失败. 请确保 Telegram 已完全关闭。"
-                )
+                raise TASException("权限不足. 请确保 Telegram 已完全关闭。")
             time.sleep(1)
         except Exception as e:
             if attempt == max_retries - 1:
@@ -67,113 +121,95 @@ def account_switch(
 
 
 def switch_to_default(configs: ConfigManage, cipher: AESCipher, temp: str):
-    """切换回默认账户"""
-    path = configs.path
+    """还原默认账户"""
+    base_path = Path(configs.path)
+    tdata_path = base_path / "tdata"
+    key_datas_path = tdata_path / "key_datas"
+    temp_path = base_path / temp
+    
     with suppress(FileNotFoundError, TASCipherException, PermissionError):
-        # 尝试备份或加密当前tdata
-        if configs.decrypted:
-            cipher.encrypt(os.path.join(path, "tdata", "key_datas"))
-        elif configs.has_backup:
-            shutil.move(
-                os.path.join(path, "tdata", "key_datas.bak"),
-                os.path.join(path, "tdata", "key_datas"),
-            )
+        if configs.decrypted and configs.tag:
+            cipher.encrypt(key_datas_path)
 
     try:
-        # 重命名当前tdata为临时名称
-        os.rename(os.path.join(path, "tdata"), os.path.join(path, temp))
+        if tdata_path.exists():
+            tdata_path.rename(temp_path)
+    except PermissionError:
+        return False
+
+    try:
+        default_folder = search_file_in_dirs(configs.path, configs.default)
+        if default_folder:
+            (base_path / default_folder).rename(tdata_path)
+            return True
+        return False
+    except (FileNotFoundError, PermissionError):
+        if temp_path.exists():
+            with suppress(OSError):
+                temp_path.rename(tdata_path)
+        return False
+
+
+def switch_to_target(configs: ConfigManage, cipher: AESCipher, temp: str):
+    """切换至目标账户布局"""
+    base_path = Path(configs.path)
+    tdata_path = base_path / "tdata"
+    temp_path = base_path / temp
+
+    try:
+        folder_name = search_file_in_dirs(configs.path, configs.tag)
+        if not folder_name:
+            return False
+        target_dir = base_path / folder_name
+    except TypeError:
+        return False
+
+    key_datas_path = target_dir / "key_datas"
+    if target_dir == tdata_path:
+        cipher.decrypt(key_datas_path)
+        configs.decrypted = True
+        return True
+
+    cipher.decrypt(key_datas_path)
+    configs.decrypted = True
+
+    try:
+        default_folder = search_file_in_dirs(configs.path, configs.default)
+        if default_folder:
+            (base_path / default_folder).rename(temp_path)
     except FileNotFoundError:
         pass
     except PermissionError:
         return False
 
     try:
-        # 重命名默认账户为tdata
-        os.rename(
-            os.path.join(path, search_file_in_dirs(path, configs.default)),
-            os.path.join(path, "tdata"),
-        )
-        return True
-    except FileNotFoundError:
-        # 恢复原始tdata
-        if os.path.exists(os.path.join(path, temp)):
-            with suppress(OSError):
-                os.rename(os.path.join(path, temp), os.path.join(path, "tdata"))
-        return False
-    except PermissionError:
-        # 尝试回滚
-        if os.path.exists(os.path.join(path, temp)):
-            with suppress(OSError):
-                os.rename(os.path.join(path, temp), os.path.join(path, "tdata"))
-        return False
-
-
-def switch_to_target(configs: ConfigManage, cipher: AESCipher, temp: str):
-    """切换为目标账户"""
-    path = configs.path
-
-    try:
-        target_dir = Path(path) / search_file_in_dirs(path, configs.tag)
-    except TypeError:
-        return False
-
-    if target_dir == os.path.join(path, "tdata"):
-        return True
-
-    try:
-        cipher.decrypt(os.path.join(target_dir, "key_datas"))
-        configs.decrypted = True
-    except TASCipherException:
-        shutil.copy2(
-            os.path.join(target_dir, "key_datas"),
-            os.path.join(target_dir, "key_datas.bak"),
-        )
-        configs.has_backup = True
-
-    try:
-        # 重命名当前tdata为临时名称
-        os.rename(
-            os.path.join(path, search_file_in_dirs(path, configs.default)),
-            os.path.join(path, temp),
-        )
-    except FileNotFoundError:
-        pass  # 可能是首次切换
-    except PermissionError:
-        return False
-
-    try:
-        # 重命名目标账户为tdata
-        os.rename(target_dir, os.path.join(path, "tdata"))
+        target_dir.rename(tdata_path)
         return True
     except (FileNotFoundError, PermissionError):
-        # 尝试回滚
-        _rollback_rename(path, configs.default, temp)
+        _rollback_rename(base_path, temp)
         return False
 
 
-def _rollback_rename(path: str, default_tag: str, temp: str):
-    """回滚重命名操作"""
+def _rollback_rename(base_path: Path, temp: str):
+    """回退重命名操作"""
     try:
-        # 尝试恢复原始tdata
-        temp_path = os.path.join(path, temp)
-        default_path = os.path.join(path, search_file_in_dirs(path, default_tag))
-        target_path = os.path.join(path, "tdata")
+        temp_path = base_path / temp
+        target_path = base_path / "tdata"
 
-        if os.path.exists(target_path):
-            if os.path.isdir(target_path):
+        if target_path.exists():
+            if target_path.is_dir():
                 shutil.rmtree(target_path)
 
-        # 恢复临时文件夹
-        if os.path.exists(temp_path):
-            os.rename(temp_path, target_path)
+        if temp_path.exists():
+            temp_path.rename(target_path)
     except OSError:
-        pass  # 回滚失败，状态已损坏
+        pass
 
 
 def recovery():
-    """强制恢复为默认账户"""
+    """紧急强制恢复"""
     configs = ConfigManage()
     with suppress(FileNotFoundError, PermissionError):
         from src.modules.process_manager import ProcessManager
         ProcessManager.kill_process(configs.client)
-        account_switch("restore")
+        restore_default()

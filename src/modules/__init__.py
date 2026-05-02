@@ -1,6 +1,6 @@
 from .config_manager import ConfigManage
 from .logger import Logger
-from .aes_crypto import AESCipher
+from .crypto import AESCipher
 from .process_manager import (
     ProcessManager,
     ProcessMonitor
@@ -13,9 +13,8 @@ from .utils import (
 from .exceptions import (
     TASException,
     TASConfigException,
-    TASCipherException
 )
-from .account.AccountSwitcher import (
+from .account import (
     AccountSwitcher,
     recovery
 )

@@ -16,8 +16,9 @@ from src.modules.logger import Logger
 
 class ProcessManager:
     @staticmethod
-    def start_process(configs: ConfigManage):
-        """客户端启动函数"""
+    def start_process(wait: bool = True):
+        """启动客户端"""
+        configs = ConfigManage()
         try:
             full_path = Path(configs.path) / configs.client
 
@@ -29,6 +30,9 @@ class ProcessManager:
                 shell=False,
                 start_new_session=True,
             )
+
+            if not wait:
+                return True
 
             max_time = 15
             interval = 0.2
@@ -55,7 +59,7 @@ class ProcessManager:
         access_denied = False
 
         for process in psutil.process_iter(['name']):
-            if client == process.info['name']:
+            if client == process.info.get('name'):
                 processes_to_kill.append(process)
 
         if not processes_to_kill:
@@ -82,7 +86,7 @@ class ProcessManager:
 
         if access_denied and not killed:
             raise TASException(
-                f"无法终止进程 {client}。权限不足，请尝试以管理员身份运行程序。"
+                f"无法终止进程 {client}。由于权限不足，请尝试以管理员身份运行程序。"
             )
 
         return killed
@@ -100,7 +104,7 @@ class ProcessMonitor:
     def add_callback(self, callback: Callable):
         """添加状态变化回调函数"""
         if not callable(callback):
-            raise TypeError("回调函数必须可调用")
+            raise TypeError("回调必须可调用")
         self._callbacks.append(callback)
 
     def remove_callback(self, callback: Callable):
@@ -130,11 +134,12 @@ class ProcessMonitor:
                 current_status = await self._check_status()
 
                 if current_status != last_status:
+                    # 状态发生变化时触发回调
                     for callback in self._callbacks:
                         try:
                             asyncio.create_task(callback(current_status))
                         except Exception as e:
-                            self.logger.exception(f"函数回调失败.", e)
+                            self.logger.exception(f"回调执行失败", e)
                     last_status = current_status
 
                 await asyncio.sleep(self.check_interval)

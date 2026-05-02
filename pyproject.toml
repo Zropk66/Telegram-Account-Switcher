@@ -5,13 +5,11 @@ description = "Telegram Account Switcher Project!"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "cryptography>=45.0.7",
+    "cryptography>=46.0.7",
     "loguru>=0.7.3",
     "psutil>=7.2.1",
-    "pyside6>=6.10.1",
-]
-
-[dependency-groups]
-dev = [
-    "nuitka>=2.8.10",
+    "pyside6>=6.11.0",
+    "tgcrypto>=1.2.5",
+    "nuitka>=4.0.7",
+    "zstandard>=0.25.0",
 ]

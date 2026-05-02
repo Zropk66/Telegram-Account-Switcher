@@ -4,7 +4,6 @@
 import threading
 import json
 import sys
-from pathlib import Path
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import QObject, Signal
@@ -20,7 +19,7 @@ log_signals = LogSignals()
 
 
 def show_message(title, message, level):
-    """显示弹窗"""
+    """显示提示弹窗"""
     app = QApplication.instance()
     if app is None:
         app = QApplication(sys.argv)
@@ -32,7 +31,7 @@ def show_message(title, message, level):
 
 
 def setup_popup_handler():
-    """弹窗处理器"""
+    """配置弹窗处理器"""
 
     def popup_sink(message):
         extra = message.record.get("extra", {})
@@ -102,7 +101,6 @@ class Logger:
             if config_file.exists():
                 with open(config_file, "r", encoding="utf-8") as f:
                     if json.load(f).get("log_output", False):
-                        # log_file_path = os.getcwd()
                         logger.add(
                             'TAS.log',
                             rotation="10 MB",
@@ -115,7 +113,7 @@ class Logger:
 
     @staticmethod
     def log(level, message, popup=False, **kwargs):
-        """通用日志记录方法"""
+        """记录日志"""
 
         exc = kwargs.pop("exc", None)
         logger.opt(exception=exc, depth=1).bind(popup=popup, **kwargs).log(

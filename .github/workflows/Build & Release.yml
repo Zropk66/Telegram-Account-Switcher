@@ -13,9 +13,10 @@ env:
 jobs:
   build:
     runs-on: windows-latest
-
+    strategy:
+      matrix:
+        compiler: [mingw, msvc]
     outputs:
-      output_name: ${{ steps.generate-output.outputs.result }}
       version: ${{ steps.generate-output.outputs.version }}
 
     steps:
@@ -44,23 +45,11 @@ jobs:
         run: |
           $UPX_URL = "https://github.com/upx/upx/releases/download/v5.1.0/upx-5.1.0-win64.zip"
           $UPX_ZIP = "upx-5.1.0-win64.zip"
-          
           $UPX_DIR = "upx-5.1.0-win64"
-      
-          Write-Host "Downloading UPX v5.1.0 from $UPX_URL ..."
-          
           Invoke-WebRequest -Uri $UPX_URL -OutFile $UPX_ZIP
-      
-          Write-Host "Extracting $UPX_ZIP ..."
-          
           Expand-Archive -Path $UPX_ZIP -DestinationPath . -Force
-      
-          Write-Host "Adding UPX directory to system PATH (for this job) ..."
           $UPX_FULL_PATH = (Get-Item ".\$UPX_DIR").FullName
           echo "$UPX_FULL_PATH" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-      
-          Write-Host "UPX setup completed successfully. Version info:"
-          & ".\$UPX_DIR\upx.exe" --version
 
       - name: Install Nuitka
         run: |
@@ -71,33 +60,28 @@ jobs:
         shell: powershell
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-
-          try {
-            $PY_VER = uv run python -c "import sys;print(sys.version.split(' ')[0])"
-            $VERSION = uv run python -c "from src.main import VERSION;print(VERSION)"
-          } catch {
-            Write-Error "ERROR: $_"
-            exit 1
-          }
-          $OUTPUT_NAME = "TAS_v${VERSION}_$($env:OS_ENV)_Py${PY_VER}.exe"
-
-          Write-Output "Python Version: $PY_VER"
-          Write-Output "TAS Version: $VERSION"
-          Write-Output "Generate Output Name: $OUTPUT_NAME"
+          $PY_VER = uv run python -c "import sys;print(sys.version.split(' ')[0])"
+          $VERSION = uv run python -c "from src.main import VERSION;print(VERSION)"
           
+          # 依据编译器区分后缀
+          $COMPILER_SUFFIX = if ("${{ matrix.compiler }}" -eq "mingw") { "MinGW" } else { "MSVC" }
+          $OUTPUT_NAME = "TAS_v${VERSION}_$($env:OS_ENV)_Py${PY_VER}_${COMPILER_SUFFIX}.exe"
+
+          echo "VERSION=$VERSION" >> $env:GITHUB_ENV
           echo "OUTPUT_NAME=$OUTPUT_NAME" >> $env:GITHUB_ENV
-          echo "result=$OUTPUT_NAME" >> $env:GITHUB_OUTPUT
           echo "version=$VERSION" >> $env:GITHUB_OUTPUT
 
       - name: Compile with Nuitka
         run: |
-          uv run python -m nuitka --mingw64 --onefile-no-compression --assume-yes-for-downloads --standalone --onefile --windows-console-mode=disable --plugin-enable=upx --plugin-enable=pyside6 --output-filename=${{ env.OUTPUT_NAME }} --output-dir=output --remove-output --lto=yes .\launcher.py
+          $COMPILER_FLAG = if ("${{ matrix.compiler }}" -eq "mingw") { "--mingw64" } else { "" }
+          uv run python -m nuitka $COMPILER_FLAG --onefile-no-compression --assume-yes-for-downloads --standalone --onefile --windows-console-mode=disable --plugin-enable=upx --plugin-enable=pyside6 --output-filename=${{ env.OUTPUT_NAME }} --output-dir=output --remove-output --lto=yes .\launcher.py
+        shell: pwsh
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.OUTPUT_NAME }}
-          path: output/${{ env.OUTPUT_NAME }}
+          name: build-${{ matrix.compiler }}
+          path: output/*.exe
           retention-days: 7
 
   release:
@@ -105,19 +89,18 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      actions: read
-      packages: write
     steps:
-      - name: Download Artifact
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          name: ${{ needs.build.outputs.output_name }}
           path: ./artifacts
+          pattern: build-*
+          merge-multiple: true
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: ./artifacts/${{ needs.build.outputs.output_name }}
+          files: ./artifacts/*.exe
           name: ${{ needs.build.outputs.version }}
           tag_name: v${{ needs.build.outputs.version }}
           draft: false
