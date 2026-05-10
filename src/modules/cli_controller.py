@@ -2,27 +2,55 @@
 import argparse
 import sys
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Callable
 
-from src.modules import ConfigManage, AESCipher, Logger
-from src.ui.help_ui import open_help_window
-from src.ui.settings_ui import open_settings_window
+from src.modules.config import ConfigService
+from src.modules import AESCipher, Logger
+from src.modules.exceptions import TASConfigException
+from src.modules.utils import search_file_in_dirs
+
+
+# 定义回调类型别名，提高代码可读性
+HelpHandler = Callable[[str], None]           # (version: str) -> None
+SettingsHandler = Callable[[str], None]       # (version: str) -> None
+InfoHandler = Callable[[str], None]           # (message: str) -> None
+WarningHandler = Callable[[str], None]        # (message: str) -> None
+ErrorHandler = Callable[[str], None]          # (message: str) -> None
 
 
 class CLIController:
-    """CLI 命令处理"""
+    """CLI 命令处理
+    
+    通过依赖注入接收UI回调，实现业务逻辑与界面展示的解耦。
+    
+    Args:
+        version: 应用程序版本号
+        help_handler: 显示帮助窗口的回调函数
+        settings_handler: 显示设置窗口的回调函数
+        info_handler: 显示信息提示的回调函数（可选）
+        warning_handler: 显示警告提示的回调函数（可选）
+        error_handler: 显示错误提示的回调函数（可选）
+    """
 
-    def __init__(self, version: str = "1.3.0"):
+    def __init__(
+        self,
+        version: str = "1.3.0",
+        help_handler: Optional[HelpHandler] = None,
+        settings_handler: Optional[SettingsHandler] = None,
+        info_handler: Optional[InfoHandler] = None,
+        warning_handler: Optional[WarningHandler] = None,
+        error_handler: Optional[ErrorHandler] = None
+    ):
         self.version = version
-        self.config = ConfigManage()
+        self.config = ConfigService()
         self.logger = Logger()
-
-        try:
-            from src.main import search_file_in_dirs
-            self.search_file_in_dirs = staticmethod(search_file_in_dirs)
-        except ImportError:
-            from src.modules.utils import search_file_in_dirs
-            self.search_file_in_dirs = staticmethod(search_file_in_dirs)
+        
+        # 注入的回调函数
+        self._help_handler = help_handler
+        self._settings_handler = settings_handler
+        self._info_handler = info_handler
+        self._warning_handler = warning_handler
+        self._error_handler = error_handler
 
     def parse_args(self) -> argparse.Namespace:
         parser = argparse.ArgumentParser(description="TAS CLI", add_help=False, exit_on_error=False)
@@ -53,16 +81,12 @@ class CLIController:
             path = Path(self.config.path)
 
             if not (path / self.config.client).is_file():
-                from src.modules.exceptions import TASConfigException
                 raise TASConfigException("找不到客户端程序")
             if not path.is_dir():
-                from src.modules.exceptions import TASConfigException
                 raise TASConfigException("路径格式不正确")
             if not self.config.default:
-                from src.modules.exceptions import TASConfigException
                 raise TASConfigException("未设置默认账户")
-            if not self.search_file_in_dirs(str(path), self.config.default):
-                from src.modules.exceptions import TASConfigException
+            if not search_file_in_dirs(str(path), self.config.default):
                 raise TASConfigException(f"默认账户 '{self.config.default}' 文件夹未找到")
 
             return True
@@ -86,18 +110,22 @@ class CLIController:
         if tag == self.config.default:
             return tag
 
-        if tag not in self.config.tags or not self.search_file_in_dirs(self.config.path, tag):
+        if tag not in self.config.tags or not search_file_in_dirs(self.config.path, tag):
             self.logger.warning(f"标签无效或文件缺失: {tag}")
             return self.config.default
         return tag
 
     def handle_actions(self, args: argparse.Namespace) -> bool:
+        """处理命令行动作
+        
+        根据参数执行相应操作，通过回调函数与UI交互。
+        """
         if args.help:
-            open_help_window(self.version)
+            self._show_help()
         elif args.version:
-            self.logger.info(f"TAS v{self.version}", popup=True)
+            self._show_version()
         elif args.settings:
-            open_settings_window(self.version)
+            self._open_settings()
         else:
             if args.encrypt:
                 if args.tag:
@@ -113,9 +141,41 @@ class CLIController:
                 return False
         return True
 
+    def _show_help(self) -> None:
+        """显示帮助窗口"""
+        if self._help_handler:
+            self._help_handler(self.version)
+        else:
+            # 降级处理：打印到控制台
+            print(f"TAS v{self.version}")
+            print("用法: tas [选项]")
+            print("选项:")
+            print("  -h, --help      显示帮助")
+            print("  -v, --version   显示版本")
+            print("  -c, --settings  打开设置")
+            print("  -e, --encrypt   加密账户")
+            print("  -d, --decrypt   解密账户")
+            print("  -s, --switch    切换账户")
+
+    def _show_version(self) -> None:
+        """显示版本信息"""
+        message = f"TAS v{self.version}"
+        if self._info_handler:
+            self._info_handler(message)
+        else:
+            print(message)
+
+    def _open_settings(self) -> None:
+        """打开设置窗口"""
+        if self._settings_handler:
+            self._settings_handler(self.version)
+        else:
+            # 降级处理
+            print("设置功能需要UI支持")
+
     def _process_tags(self, operation: str) -> None:
         if not self.config.pwd:
-            self.logger.error("未指定密钥.", popup=True)
+            self._handle_error("未指定密钥.")
             sys.exit()
 
         cipher = AESCipher(self.config.pwd)
@@ -147,34 +207,34 @@ class CLIController:
             if skipped:
                 msg += f" (已跳过: {skipped})"
 
-        self.logger.info(msg, popup=True)
+        self._handle_info(msg)
 
     def _process_single_tag(self, tag: str, operation: str) -> None:
         if not self.config.pwd:
-            self.logger.error("未指定密钥.", popup=True)
+            self._handle_error("未指定密钥.")
             sys.exit()
 
         if tag not in self.config.tags and tag != self.config.default:
-            self.logger.error(f"标签 '{tag}' 未注册.", popup=True)
+            self._handle_error(f"标签 '{tag}' 未注册.")
             sys.exit()
 
         if tag == self.config.default:
-            self.logger.warning(f"标签 '{tag}' 为默认账户，禁止操作。", popup=True)
+            self._handle_warning(f"标签 '{tag}' 为默认账户，禁止操作。")
             return
 
         cipher = AESCipher(self.config.pwd)
         success, reason = self._process_tag(tag, operation, cipher)
 
         if success:
-            self.logger.info(f"标签 '{tag}' {'加密' if operation == 'encrypt' else '解密'}成功", popup=True)
+            self._handle_info(f"标签 '{tag}' {'加密' if operation == 'encrypt' else '解密'}成功")
         else:
             if reason == "已加密":
-                self.logger.warning(f"标签 '{tag}' 已加密，跳过。", popup=True)
+                self._handle_warning(f"标签 '{tag}' 已加密，跳过。")
             else:
-                self.logger.error(f"标签 '{tag}' 操作失败: {reason}", popup=True)
+                self._handle_error(f"标签 '{tag}' 操作失败: {reason}")
 
     def _process_tag(self, tag: str, operation: str, cipher: AESCipher) -> Tuple[bool, Optional[str]]:
-        tag_path = self.search_file_in_dirs(self.config.path, tag)
+        tag_path = search_file_in_dirs(self.config.path, tag)
         if not tag_path:
             return False, f"标签 '{tag}' 文件缺失"
 
@@ -195,3 +255,21 @@ class CLIController:
             return True, None
         except Exception as e:
             return False, str(e)
+
+    def _handle_info(self, message: str) -> None:
+        """处理信息提示"""
+        self.logger.info(message, popup=True)
+        if self._info_handler:
+            self._info_handler(message)
+
+    def _handle_warning(self, message: str) -> None:
+        """处理警告提示"""
+        self.logger.warning(message, popup=True)
+        if self._warning_handler:
+            self._warning_handler(message)
+
+    def _handle_error(self, message: str) -> None:
+        """处理错误提示"""
+        self.logger.error(message, popup=True)
+        if self._error_handler:
+            self._error_handler(message)

@@ -1,22 +1,86 @@
 # -*- coding: utf-8 -*-
 # @Time : 2025/5/7 13:12
 # @Author : Zropk
-import json
 import sys
 import threading
 from contextlib import suppress
+from typing import Callable, Optional, Protocol
 
 from loguru import logger
 
-from src.ui.ui_controller import alert
+
+# 弹窗处理器类型：接收 (message, title, icon_type) 参数
+PopupHandler = Callable[[str, str, str], None]
+
+# 使用字典存储处理器，确保闭包能正确引用（避免全局变量捕获问题）
+_popup_state: dict = {"handler": None}
+
+
+class ConfigProvider(Protocol):
+    """配置提供者协议 - 用于依赖注入"""
+
+    def get(self, key: str, default: any = None) -> any:
+        """获取配置项"""
+        ...
+
+
+class DefaultConfigProvider:
+    """默认配置提供者 - 当没有外部提供者时使用"""
+
+    def get(self, key: str, default: any = None) -> any:
+        return default
+
+
+# 全局配置提供者，可通过依赖注入替换
+_config_provider: ConfigProvider = DefaultConfigProvider()
+
+
+def set_config_provider(provider: ConfigProvider) -> None:
+    """
+    设置配置提供者（依赖注入入口）
+
+    Args:
+        provider: 配置提供者，需实现 get(key, default) 方法
+
+    Example:
+        def my_provider(key, default=None):
+            return my_config.get(key, default)
+
+        set_config_provider(my_provider)
+    """
+    global _config_provider
+    _config_provider = provider
+
+
+def set_popup_handler(handler: Optional[PopupHandler]) -> None:
+    """
+    设置弹窗处理器（依赖注入入口）
+
+    Args:
+        handler: 弹窗处理函数，签名 (message: str, title: str, icon_type: str) -> None
+                 传入 None 可移除当前处理器
+
+    Example:
+        def my_popup(message, title, icon_type):
+            # 自定义弹窗逻辑
+            pass
+
+        set_popup_handler(my_popup)
+    """
+    _popup_state["handler"] = handler
 
 
 def setup_popup_handler():
-    """配置弹窗处理器"""
+    """配置弹窗处理器（使用注入的处理器）"""
 
     def popup_sink(message):
         extra = message.record.get("extra", {})
         if not extra.get("popup", False):
+            return
+
+        # 从字典获取处理器，确保获取最新值
+        handler = _popup_state.get("handler")
+        if handler is None:
             return
 
         level_map = {
@@ -34,7 +98,8 @@ def setup_popup_handler():
         if exception := message.record.get("exception", None):
             full_message += f"\n\n{exception}"
 
-        alert(full_message, title=message.record["level"].name, icon=icon_type)
+        # 调用注入的处理器
+        handler(full_message, message.record["level"].name, icon_type)
 
     logger.add(popup_sink, filter=lambda record: record["extra"].get("popup", False))
 
@@ -68,20 +133,15 @@ class Logger:
         with suppress(TypeError):
             logger.add(sys.stderr, format=log_format, level="DEBUG", colorize=True)
 
-        with suppress(json.JSONDecodeError, IOError):
-            from src.modules.config_manager import ConfigManage
-
-            config_file = ConfigManage().config_file
-            if config_file.exists():
-                with open(config_file, "r", encoding="utf-8") as f:
-                    if json.load(f).get("log_output", False):
-                        logger.add(
-                            "TAS.log",
-                            rotation="10 MB",
-                            encoding="utf-8",
-                            format=log_format,
-                            level="DEBUG",
-                        )
+        # 使用注入的配置提供者读取配置
+        if _config_provider.get("log_output", False):
+            logger.add(
+                "TAS.log",
+                rotation="10 MB",
+                encoding="utf-8",
+                format=log_format,
+                level="DEBUG",
+            )
 
         setup_popup_handler()
 

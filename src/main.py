@@ -11,59 +11,69 @@ from src.modules import (
     AccountSwitcher,
     ProcessManager,
     ProcessMonitor,
-    ConfigManage,
     recovery,
     Logger,
 )
 from src.modules.cli_controller import CLIController
+from src.modules.config import (
+    ConfigService,
+    ConfigData,
+)
+from src.modules.config.key_manager import TelegramKeyManager
+from src.modules.logger import set_popup_handler, set_config_provider
+from src.ui.adapters import create_cli_callbacks, create_popup_handler
 from src.ui.settings_ui import open_settings_window
-from src.ui.ui_controller import UIController, confirm
+from src.ui.popup import Popup
 
-logger = Logger()
+# ========== 全局变量 ==========
+logger: Logger
+CONFIG: ConfigService
 TITLE = "TAS"
 VERSION = "1.3.0"
-CONFIG = ConfigManage()
-
-from src.modules.utils import search_file_in_dirs as _search_func
-
-def search_file_in_dirs(path: str, tag: str):
-    """搜索账户文件夹"""
-    return _search_func(path, tag)
-
-_cli_controller_instance = None
 
 
-def _get_cli_controller() -> CLIController:
-    """获取 CLI 控制器实例"""
-    global _cli_controller_instance
-    if _cli_controller_instance is None:
-        _cli_controller_instance = CLIController(VERSION)
-    return _cli_controller_instance
+def setup_dependency_injection():
+    """
+    设置依赖注入
+    """
+    global logger
+
+    # 1. 注入配置提供者到 Logger
+    config_provider = ConfigData.as_provider()
+    set_config_provider(config_provider)
+
+    def config_log_handler(message: str) -> None:
+        if logger:
+            logger.error(message)
+
+    ConfigService.set_log_handler(config_log_handler)
+
+    def key_manager_log_handler(message: str) -> None:
+        if logger:
+            logger.error(message)
+
+    TelegramKeyManager.set_log_handler(key_manager_log_handler)
 
 
-def process_tags(operation: str) -> None:
-    """批量处理账户的加解密"""
-    return _get_cli_controller()._process_tags(operation)
+def create_logger_with_popup() -> Logger:
+    """创建带弹窗功能的Logger"""
+    new_logger = Logger()
+    popup_handler = create_popup_handler()
+    set_popup_handler(popup_handler)
+    return new_logger
 
 
-def process_single_tag(tag: str, operation: str) -> None:
-    """处理单个账户的加解密"""
-    return _get_cli_controller()._process_single_tag(tag, operation)
-
-
-def check_configs(args) -> bool:
-    """检查配置是否有效"""
-    return _get_cli_controller().check_config(args)
-
-
-def parse_args():
-    """解析命令行参数"""
-    return _get_cli_controller().parse_args()
-
-
-def handle_cli_actions(args) -> bool:
-    """处理 CLI 动作"""
-    return _get_cli_controller().handle_actions(args)
+def create_cli_controller(version: str) -> CLIController:
+    """创建CLIController"""
+    callbacks = create_cli_callbacks()
+    return CLIController(
+        version=version,
+        help_handler=callbacks["help_handler"],
+        settings_handler=callbacks["settings_handler"],
+        info_handler=callbacks["info_handler"],
+        warning_handler=callbacks["warning_handler"],
+        error_handler=callbacks["error_handler"],
+    )
 
 
 class TASApp:
@@ -74,9 +84,10 @@ class TASApp:
         self.version = version
         self.monitor = None
         self.loop = None
+        self._monitor_thread = None
         self.app = QApplication.instance() or QApplication(sys.argv)
-        self.ui_controller = UIController.instance()
-        self.cli_controller = CLIController(version)
+        self.ui_controller = Popup.instance()
+        self.cli_controller = create_cli_controller(version)
 
     def __enter__(self):
         global _cleanup_done
@@ -86,6 +97,7 @@ class TASApp:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        self._join_monitor_thread(timeout=5)
         log_and_exit(mark=True)
 
     async def _watcher_task(self):
@@ -100,12 +112,24 @@ class TASApp:
         """启动监控线程"""
         self.loop = asyncio.new_event_loop()
         self.monitor = ProcessMonitor(CONFIG.client)
-        threading.Thread(
+        self._monitor_thread = threading.Thread(
             target=run_async_in_thread,
             args=(self.loop, self._watcher_task()),
             daemon=True
-        ).start()
-        # logger.info("监控线程启动成功")
+        )
+        self._monitor_thread.name = "process-monitor"
+        self._monitor_thread.start()
+
+    def _join_monitor_thread(self, timeout: float = 5):
+        """等待监控线程自然退出，超时则强制关闭事件循环"""
+        if self._monitor_thread is not None and self._monitor_thread.is_alive():
+            self._monitor_thread.join(timeout=timeout)
+            if self._monitor_thread.is_alive() and self.loop is not None and not self.loop.is_closed():
+                try:
+                    self.loop.call_soon_threadsafe(self.loop.stop)
+                except RuntimeError:
+                    pass
+        self.loop = None
 
     def run(self):
         """运行主逻辑"""
@@ -129,7 +153,9 @@ class TASApp:
         ProcessManager.kill_process(CONFIG.client)
 
         def wrapped_confirm(msg):
-            return confirm(msg, "账户切换确认")
+            with Popup.context():
+                Popup.confirm(msg, "账户切换确认")
+            return
 
         switched = AccountSwitcher().process(confirm_callback=wrapped_confirm)
 
@@ -155,14 +181,14 @@ def log_and_exit(mark=False):
     global _cleanup_done
     if mark and _cleanup_done:
         return None
-    config = ConfigManage()
+    config = ConfigService()
     with suppress(Exception):
         if mark:
             _cleanup_done = True
             atexit.unregister(log_and_exit)
             recovery()
 
-        if config.log_output and config.start_time:
+        if config.log_output and config.start_time and logger:
             logger.info(f"运行时长：{config.watch_time()}")
     return None
 
@@ -181,11 +207,12 @@ def handle_global_exception(exc_type, exc_value, exc_traceback):
     """全局异常捕获"""
     if exc_type in (KeyboardInterrupt, SystemExit):
         sys.exit(0)
-    logger.exception(
-        "捕获到未处理异常, 请尝试重启程序或联系开发者.",
-        exc_value,
-        popup=True,
-    )
+    if logger:
+        logger.exception(
+            "捕获到未处理异常, 请尝试重启程序或联系开发者.",
+            exc_value,
+            popup=True,
+        )
 
 
 async def status_handler(is_alive: bool) -> None:
@@ -196,11 +223,25 @@ def run_async_in_thread(loop, coro) -> None:
     asyncio.set_event_loop(loop)
     try:
         loop.run_until_complete(coro)
+    except RuntimeError:
+        pass
     finally:
+        pending = asyncio.all_tasks(loop)
+        for task in pending:
+            task.cancel()
+        if pending:
+            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
         loop.close()
 
 
 def main():
     """主入口"""
+    global logger, CONFIG
+
+    setup_dependency_injection()
+
+    logger = create_logger_with_popup()
+    CONFIG = ConfigService()
+
     with TASApp(VERSION) as app:
         return app.run()

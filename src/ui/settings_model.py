@@ -4,13 +4,13 @@ from typing import Dict, Any
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QListWidgetItem, QListWidget
 
-from src.modules import ConfigManage
+from src.modules.config import ConfigService
 
 
 class AccountListModel:
     """管理账号列表的数据表示层"""
 
-    def __init__(self, list_widget: QListWidget, config: ConfigManage):
+    def __init__(self, list_widget: QListWidget, config: ConfigService):
         self.list_widget = list_widget
         self.config = config
 

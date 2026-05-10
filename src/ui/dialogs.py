@@ -39,7 +39,7 @@ class EditLabelDialog(QDialog):
         self.ui.default_button.clicked.connect(self.set_default_and_accept)
 
     def validate_inputs(self) -> bool:
-        from src.ui.settings_ui import alert
+        from src.ui.popup import alert
         folder = self.ui.folder_edit.text().strip()
         tag = self.ui.tag_edit.text().strip()
 

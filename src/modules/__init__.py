@@ -2,7 +2,7 @@ from .account import (
     AccountSwitcher,
     recovery
 )
-from .config_manager import ConfigManage
+from .config import ConfigService
 from .crypto import AESCipher
 from .exceptions import (
     TASException,
@@ -20,7 +20,7 @@ from .utils import (
 )
 
 __all__ = [
-    'ConfigManage', 'search_file_in_dirs', 'is_exists', 'ProcessManager', 'ProcessMonitor',
+    'ConfigService', 'search_file_in_dirs', 'is_exists', 'ProcessManager', 'ProcessMonitor',
     'TASException', 'TASConfigException', 'format_timedelta', 'AccountSwitcher', 'Logger',
     'AESCipher', 'recovery'
 ]

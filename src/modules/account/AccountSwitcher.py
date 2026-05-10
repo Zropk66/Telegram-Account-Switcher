@@ -11,7 +11,7 @@ from typing import Generator
 from src.modules.account.account_monitor import AccountMonitor
 from src.modules.account.account_operations import restore_default, switch_to_tag
 from src.modules.account.account_services import AccountRecoveryService
-from src.modules.config_manager import ConfigManage
+from src.modules.config import ConfigService
 from src.modules.logger import Logger
 from src.modules.process_manager import ProcessManager
 from src.modules.utils import is_exists
@@ -22,7 +22,7 @@ class AccountSwitcher:
 
     def __init__(self):
         self.logger = Logger()
-        self._config = ConfigManage()
+        self._config = ConfigService()
         self._process_manager = ProcessManager()
         self._recovery_service = AccountRecoveryService(self.logger)
 

@@ -1,19 +1,30 @@
 # -*- coding: utf-8 -*-
 import asyncio
+import atexit
 import subprocess
 import time
 from contextlib import suppress, contextmanager
 from pathlib import Path
-from typing import Callable, Generator
+from typing import Callable, Generator, Optional
 
 import psutil
 
-from src.modules.config_manager import ConfigManage
+from src.modules.config import ConfigService
 from src.modules.exceptions import TASException
 from src.modules.logger import Logger
 
 
 class ProcessManager:
+    _popen_ref: Optional[subprocess.Popen] = None
+
+    @classmethod
+    def _reap_popen(cls) -> None:
+        """清理 Popen 引用，防止僵尸进程"""
+        if cls._popen_ref is not None:
+            with suppress(Exception):
+                cls._popen_ref.poll()  # 回收子进程资源
+            cls._popen_ref = None
+
     @contextmanager
     def locked(self, client_name: str, restart_on_exit: bool = False) -> Generator[None, None, None]:
         """
@@ -29,11 +40,13 @@ class ProcessManager:
     @staticmethod
     def start_process(wait: bool = True):
         """启动客户端"""
-        configs = ConfigManage()
+        configs = ConfigService()
         try:
             full_path = Path(configs.path) / configs.client
 
-            subprocess.Popen(
+            ProcessManager._reap_popen()
+
+            proc = subprocess.Popen(
                 args=str(full_path),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -41,6 +54,7 @@ class ProcessManager:
                 shell=False,
                 start_new_session=True,
             )
+            ProcessManager._popen_ref = proc
 
             if not wait:
                 return True
@@ -62,6 +76,9 @@ class ProcessManager:
     @staticmethod
     def kill_process(client: str):
         """终止所有匹配的进程"""
+        # 清理 Popen 引用
+        ProcessManager._reap_popen()
+
         if not isinstance(client, str):
             raise TypeError(f"{client} 必须为 {str}, 但实际为 {type(client)}")
 
@@ -145,7 +162,6 @@ class ProcessMonitor:
                 current_status = await self._check_status()
 
                 if current_status != last_status:
-                    # 状态发生变化时触发回调
                     for callback in self._callbacks:
                         try:
                             asyncio.create_task(callback(current_status))
@@ -190,3 +206,7 @@ class ProcessMonitor:
         except Exception as e:
             self.logger.exception(f"检查进程状态时出现错误.", e)
             return False
+
+
+# 注册退出时清理 Popen 引用，防止僵尸进程
+atexit.register(ProcessManager._reap_popen)

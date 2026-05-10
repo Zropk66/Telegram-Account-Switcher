@@ -11,10 +11,11 @@ from PySide6.QtCore import Qt, QThreadPool, Slot, QPoint
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QMainWindow, QFileDialog, QApplication, QMenu, QDialog
 
-from src.modules import TASConfigException, Logger, ConfigManage
+from src.modules.config import ConfigService
+from src.modules import TASConfigException, Logger
 from src.ui.dialogs import EditLabelDialog, SettingsDialogHelper
 from src.ui.settings_model import AccountListModel
-from src.ui.ui_controller import alert, confirm
+from src.ui.popup import alert, confirm
 from src.ui.ui_settings import Ui_setting
 from src.ui.ui_utils import (
     DoubleClickFilter,
@@ -35,7 +36,7 @@ class SettingsController:
 
     def __init__(self, window: 'SettingsWindow'):
         self.window = window
-        self.config = ConfigManage()
+        self.config = ConfigService()
         self.model = AccountListModel(window.ui.tags_widget, self.config)
         self.thread_pool = QThreadPool.globalInstance()
 
@@ -100,8 +101,8 @@ class SettingsWindow(QMainWindow):
         self.ui = Ui_setting()
         self.ui.setupUi(self)
         self.controller = SettingsController(self)
-        self.config_manage = ConfigManage()
-        self.current_configs = self.config_manage.configs
+        self.config = ConfigService()
+        self.current_configs = self.config.configs
         self.lock = RLock()
 
         self.ui.version_label.setText(f'TAS v{version}')
@@ -137,7 +138,7 @@ class SettingsWindow(QMainWindow):
             self.ui.cancel_button.clicked.connect(self.close)
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        if ConfigManage().configs != self.current_configs:
+        if self.config.configs != self.current_configs:
             if confirm("配置已更改但未保存，你确定要退出程序吗？", "Tips"):
                 event.accept()
             else:
@@ -154,7 +155,7 @@ class SettingsWindow(QMainWindow):
             self.add_item_event()
         elif delete_action and action == delete_action:
             self.controller.model.remove_current(
-                lambda: self.update_current_config('tags', self.config_manage.get_all_accounts())
+                lambda: self.update_current_config('tags', self.config.get_all_accounts())
             )
 
     def update_current_config(self, key, value):
@@ -163,7 +164,7 @@ class SettingsWindow(QMainWindow):
     @Slot()
     def save_config_event(self):
         try:
-            ConfigManage().batch_update(self.current_configs)
+            self.config.batch_update(self.current_configs)
             Logger().info('配置保存成功')
             alert('配置已保存', '成功')
         except TASConfigException as e:
@@ -188,7 +189,7 @@ class SettingsWindow(QMainWindow):
     @Slot()
     def scan_account_event(self):
         self.controller.scan_accounts(self.ui.path_edit.text())
-        self.current_configs['tags'] = self.config_manage.get_all_accounts()
+        self.current_configs['tags'] = self.config.get_all_accounts()
 
     def _handle_edit_dialog_result(self, item, dialog):
         """处理编辑对话框的结果"""
@@ -200,14 +201,14 @@ class SettingsWindow(QMainWindow):
             self.update_current_config,
             self.controller.model.update_item,
             self.controller.model.add_account,
-            self.config_manage,
+            self.config,
             self.controller.model.refresh_display
         )
 
     @Slot()
     def remove_item_event(self):
         self.controller.model.remove_current(
-            lambda: self.update_current_config('tags', self.config_manage.get_all_accounts())
+            lambda: self.update_current_config('tags', self.config.get_all_accounts())
         )
 
     @Slot()
@@ -228,7 +229,4 @@ class SettingsWindow(QMainWindow):
             self.update_current_config('path', user_select)
 
 
-__all__ = ['SettingsWindow', 'open_settings_window', 'alert', 'confirm']
-
-alert = alert
-confirm = confirm
+__all__ = ['SettingsWindow', 'open_settings_window']

@@ -9,9 +9,11 @@ from pathlib import Path
 from typing import Literal, Callable, Optional
 
 from src.modules.account.account_services import AccountFileSystemService
-from src.modules.config_manager import ConfigManage
+from src.modules.config import ConfigService
 from src.modules.crypto import AESCipher
 from src.modules.exceptions import TASException, TASCipherException
+from src.modules.logger import Logger
+from src.modules.process_manager import ProcessManager
 
 
 def restore_default(max_retries: int = 5) -> bool:
@@ -29,9 +31,9 @@ def switch_to_tag(max_retries: int = 5, confirm_callback: Optional[Callable[[str
 
 
 def _account_switch(method: Literal["restore", "target"], max_retries: int = 5,
-                   confirm_callback: Optional[Callable[[str], bool]] = None):
+                   confirm_callback: Optional[Callable[[str], bool]] = None) -> bool:
     """底层切换逻辑实现"""
-    configs = ConfigManage()
+    configs = ConfigService()
     cipher = AESCipher(configs.pwd)
     target_tag = None
 
@@ -70,7 +72,6 @@ def _account_switch(method: Literal["restore", "target"], max_retries: int = 5,
                     configs.decrypted = True
                     return True
                 except TASCipherException as e:
-                    from src.modules import Logger
                     if configs.has_complete_keys(target_tag):
                         Logger().warning(f"检测到账户 '{target_tag}' 密钥损坏")
                         if confirm_callback:
@@ -98,7 +99,6 @@ def _account_switch(method: Literal["restore", "target"], max_retries: int = 5,
             time.sleep(1)
 
         except TASCipherException as e:
-            from src.modules import Logger
             Logger().error(f"无法解密账户 '{target_tag}': {e}. 切换中止。", popup=True)
             return False
         except PermissionError:
@@ -113,7 +113,7 @@ def _account_switch(method: Literal["restore", "target"], max_retries: int = 5,
     return False
 
 
-def switch_to_default(configs: ConfigManage, cipher: AESCipher, temp: str, fs_service: AccountFileSystemService):
+def switch_to_default(configs: ConfigService, cipher: AESCipher, temp: str, fs_service: AccountFileSystemService) -> bool:
     """还原默认账户"""
     tdata_path = Path(configs.path) / "tdata"
 
@@ -128,7 +128,7 @@ def switch_to_default(configs: ConfigManage, cipher: AESCipher, temp: str, fs_se
     return fs_service.swap_active_tdata_with_target(default_folder, temp)
 
 
-def switch_to_target(configs: ConfigManage, cipher: AESCipher, temp: str, fs_service: AccountFileSystemService):
+def switch_to_target(configs: ConfigService, cipher: AESCipher, temp: str, fs_service: AccountFileSystemService) -> bool:
     """切换至目标账户布局"""
     folder_name = fs_service.find_account_folder(configs.tag)
     if not folder_name:
@@ -150,10 +150,9 @@ def switch_to_target(configs: ConfigManage, cipher: AESCipher, temp: str, fs_ser
     return True
 
 
-def recovery():
+def recovery() -> None:
     """紧急强制恢复"""
-    configs = ConfigManage()
+    configs = ConfigService()
     with suppress(FileNotFoundError, PermissionError):
-        from src.modules.process_manager import ProcessManager
         ProcessManager.kill_process(configs.client)
         restore_default()

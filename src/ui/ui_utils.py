@@ -49,20 +49,8 @@ class AccountScannerHelper:
     @staticmethod
     def validate_path(base_path: str) -> bool:
         if not base_path or not Path(base_path).exists():
-            # 查找已加载的 ui 模块中的 alert，方便测试 mock
-            import sys
-            for module_name in list(sys.modules.keys()):
-                if module_name.startswith('src.ui.'):
-                    try:
-                        module = sys.modules[module_name]
-                        if hasattr(module, 'alert'):
-                            module.alert("请输入有效的 Telegram 客户端路径", "警告", "warning")
-                            break
-                    except Exception:
-                        continue
-            else:
-                from src.ui.ui_controller import alert
-                alert("请输入有效的 Telegram 客户端路径", "警告", "warning")
+            from src.ui.popup import alert
+            alert("请输入有效的 Telegram 客户端路径", "警告", "warning")
             return False
         return True
 
@@ -91,10 +79,11 @@ class AsyncTaskRunner:
 
     @staticmethod
     def run_search_client(thread_pool, finished_callback, error_callback):
-        from src.ui.settings_services import SystemScannerService, TaskRunner
+        from src.ui.settings_services import TaskRunner
+        from src.modules.env_service import TelegramEnvService
 
         def task():
-            return SystemScannerService.search_client()
+            return TelegramEnvService.search_client()
 
         runner = TaskRunner(task)
         runner.signals.finished.connect(finished_callback)
