@@ -4,8 +4,8 @@
 # @Author : Zropk
 import sys
 
-from PySide6.QtWidgets import QWidget, QApplication, QTableWidgetItem, QHeaderView, QTableWidget, QAbstractItemView
 from PySide6.QtCore import Slot
+from PySide6.QtWidgets import QWidget, QApplication, QTableWidgetItem, QHeaderView, QTableWidget, QAbstractItemView
 
 from src.ui.ui_help import Ui_help
 

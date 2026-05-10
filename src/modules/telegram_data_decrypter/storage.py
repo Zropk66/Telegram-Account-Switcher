@@ -1,20 +1,9 @@
 from io import BytesIO
 from typing import Tuple, List
 
-from src.modules.telegram_data_decrypter.crypto import create_local_key, create_legacy_local_key, decrypt_local
+from src.modules.telegram_data_decrypter.crypto import create_local_key, decrypt_local
 from src.modules.telegram_data_decrypter.qt import read_qt_byte_array, read_qt_int32
 from src.modules.telegram_data_decrypter.tdf import RawTdfFile
-
-
-def decrypt_settings_tdf(settings_tdf: RawTdfFile):
-    encrypted_stream = BytesIO(settings_tdf.encrypted_data)
-
-    salt = read_qt_byte_array(encrypted_stream)
-    encrypted_settings = read_qt_byte_array(encrypted_stream)
-
-    settings_key = create_legacy_local_key(b'', salt)
-
-    return decrypt_local(encrypted_settings, settings_key)
 
 
 def decrypt_key_data_tdf(passcode: bytes, key_data_tdf: RawTdfFile):

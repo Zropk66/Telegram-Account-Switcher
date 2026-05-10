@@ -1,4 +1,5 @@
 import hashlib
+
 import tgcrypto
 
 LocalEncryptNoPwdIterCount = 4

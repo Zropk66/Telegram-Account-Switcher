@@ -1,33 +1,14 @@
 # -*- coding: utf-8 -*-
 # @Time : 2025/5/7 13:12
 # @Author : Zropk
-import threading
 import json
 import sys
-
-from PySide6.QtWidgets import QApplication, QMessageBox
-from PySide6.QtCore import QObject, Signal
+import threading
 from contextlib import suppress
+
 from loguru import logger
 
-
-class LogSignals(QObject):
-    show_popup = Signal(str, str, QMessageBox.Icon)
-
-
-log_signals = LogSignals()
-
-
-def show_message(title, message, level):
-    """显示提示弹窗"""
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication(sys.argv)
-    msg_box = QMessageBox()
-    msg_box.setWindowTitle(title.upper())
-    msg_box.setText(message)
-    msg_box.setIcon(level)
-    msg_box.exec()
+from src.ui.ui_controller import alert
 
 
 def setup_popup_handler():
@@ -39,30 +20,23 @@ def setup_popup_handler():
             return
 
         level_map = {
-            "DEBUG": QMessageBox.Icon.Information,
-            "INFO": QMessageBox.Icon.Information,
-            "WARNING": QMessageBox.Icon.Warning,
-            "ERROR": QMessageBox.Icon.Critical,
-            "CRITICAL": QMessageBox.Icon.Critical,
-            "EXCEPTION": QMessageBox.Icon.Critical,
+            "DEBUG": "info",
+            "INFO": "info",
+            "WARNING": "warning",
+            "ERROR": "error",
+            "CRITICAL": "error",
+            "EXCEPTION": "error",
         }
 
-        level_icon = level_map.get(
-            message.record["level"].name, QMessageBox.Icon.Information
-        )
+        icon_type = level_map.get(message.record["level"].name, "info")
         full_message = message.record["message"]
 
         if exception := message.record.get("exception", None):
             full_message += f"\n\n{exception}"
 
-        log_signals.show_popup.emit(
-            message.record["level"].name, full_message, level_icon
-        )
+        alert(full_message, title=message.record["level"].name, icon=icon_type)
 
     logger.add(popup_sink, filter=lambda record: record["extra"].get("popup", False))
-
-
-log_signals.show_popup.connect(show_message)
 
 
 class Logger:
@@ -102,7 +76,7 @@ class Logger:
                 with open(config_file, "r", encoding="utf-8") as f:
                     if json.load(f).get("log_output", False):
                         logger.add(
-                            'TAS.log',
+                            "TAS.log",
                             rotation="10 MB",
                             encoding="utf-8",
                             format=log_format,

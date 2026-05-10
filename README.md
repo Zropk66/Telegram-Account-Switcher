@@ -155,7 +155,7 @@ A: 使用 AES-256 加密，建议设置强密码。
 
 ## 更新日志
 
-查看 [Changelog](Changelog) 了解详细更新内容。
+查看 [Changelog](CHANGELOG.md) 了解详细更新内容。
 
 ## 许可证
 

@@ -32,20 +32,6 @@ class AESCipher:
                 f'密钥类型 {type(s)} 不受支持. 当前仅支持[ {str}, {bytes}, {bytearray} ].'
             )
 
-    def _handle_cipher(self, path: str | Path, method: str, save: bool):
-        """核心处理逻辑"""
-        try:
-            if not isinstance(path, Path):
-                path = Path(path)
-            if not path.is_file():
-                raise TASCipherException(f"路径 -> {path} 不是有效文件.")
-            data = self._cipher_process(path.read_bytes(), method)
-            if save:
-                path.write_bytes(data)
-                return True
-        except TASCipherException as e:
-            raise e
-
     def _cipher_process(self, data: bytes, method: str) -> bytes:
         """执行加解密"""
         if not isinstance(data, bytes):
@@ -114,13 +100,10 @@ class AESCipher:
         if self.is_encrypted(path):
             return True
 
-        try:
-            encrypted_data = self._cipher_process(path.read_bytes(), self.METHOD_ENCRYPT)
-            if save:
-                path.write_bytes(self.ENCRYPTION_MARKER + encrypted_data)
-            return True
-        except TASCipherException as e:
-            raise e
+        encrypted_data = self._cipher_process(path.read_bytes(), self.METHOD_ENCRYPT)
+        if save:
+            path.write_bytes(self.ENCRYPTION_MARKER + encrypted_data)
+        return True
 
     def decrypt(self, path: str | Path, save: bool = True):
         """解密"""
@@ -130,15 +113,12 @@ class AESCipher:
         if not self.is_encrypted(path):
             return True
 
-        try:
-            encrypted_data = path.read_bytes()
-            data_without_marker = encrypted_data[len(self.ENCRYPTION_MARKER):]
-            decrypted_data = self._cipher_process(data_without_marker, self.METHOD_DECRYPT)
-            if save:
-                path.write_bytes(decrypted_data)
-            return True
-        except TASCipherException as e:
-            raise e
+        encrypted_data = path.read_bytes()
+        data_without_marker = encrypted_data[len(self.ENCRYPTION_MARKER):]
+        decrypted_data = self._cipher_process(data_without_marker, self.METHOD_DECRYPT)
+        if save:
+            path.write_bytes(decrypted_data)
+        return True
 
     def decrypt_bytes(self, data: bytes) -> bytes:
         """解密字节数据"""

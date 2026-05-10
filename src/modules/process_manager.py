@@ -1,20 +1,31 @@
 # -*- coding: utf-8 -*-
-# @Time : 2025/5/7 13:12
-# @Author : Zropk
+import asyncio
 import subprocess
 import time
-from contextlib import suppress
+from contextlib import suppress, contextmanager
 from pathlib import Path
-from typing import Callable
-import asyncio
+from typing import Callable, Generator
+
 import psutil
 
-from src.modules import ConfigManage
+from src.modules.config_manager import ConfigManage
 from src.modules.exceptions import TASException
 from src.modules.logger import Logger
 
 
 class ProcessManager:
+    @contextmanager
+    def locked(self, client_name: str, restart_on_exit: bool = False) -> Generator[None, None, None]:
+        """
+        进程锁定上下文管理器。
+        """
+        self.kill_process(client_name)
+        try:
+            yield
+        finally:
+            if restart_on_exit:
+                self.start_process(wait=False)
+
     @staticmethod
     def start_process(wait: bool = True):
         """启动客户端"""

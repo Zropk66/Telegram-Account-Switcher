@@ -2,7 +2,30 @@
 # @File ： utils.py
 # @Time : 2025/8/6 00:02
 # @Author : Zropk
+import contextlib
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Generator
+
+
+@contextmanager
+def atomic_rename(src: Path, dst: Path) -> Generator[None, None, None]:
+    """
+    原子重命名上下文管理器。
+    如果操作失败，尝试将 dst 还原回 src。
+    """
+    if not src.exists():
+        yield
+        return
+
+    src.rename(dst)
+    try:
+        yield
+    except Exception:
+        if dst.exists() and not src.exists():
+            with contextlib.suppress(Exception):
+                dst.rename(src)
+        raise
 
 
 def search_file_in_dirs(directory, tag_name):
@@ -22,9 +45,7 @@ def search_file_in_dirs(directory, tag_name):
                     except Exception:
                         pass
         return None
-    except Exception as e:
-        import logging
-        logging.error(f"Search for tag {tag_name} failed: {e}")
+    except Exception:
         return None
 
 

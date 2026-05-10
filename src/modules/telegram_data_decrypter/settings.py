@@ -110,7 +110,7 @@ def read_boolean(data: BytesIO) -> bool:
     return read_qt_int32(data) == 1
 
 
-def read_settings_block(verison, data: BytesIO, block_id: SettingsBlocks):
+def read_settings_block(version, data: BytesIO, block_id: SettingsBlocks):
     if block_id == SettingsBlocks.dbiAutoStart:
         return read_boolean(data)
 
@@ -172,7 +172,7 @@ def read_settings_block(verison, data: BytesIO, block_id: SettingsBlocks):
     if block_id == SettingsBlocks.dbiMtpAuthorization:
         return read_qt_byte_array(data)
 
-    raise Exception(f'Unknown block ID while reading settings: {block_id}')
+    raise ValueError(f'Unknown block ID while reading settings: {block_id}')
 
 
 def read_settings_blocks(version, data: BytesIO):

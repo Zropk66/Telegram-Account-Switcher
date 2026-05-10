@@ -155,7 +155,7 @@ Issue reports and Pull Requests are welcome!
 
 ## Changelog
 
-See [Changelog](Changelog) for detailed update information.
+See [Changelog](CHANGELOG.md) for detailed update information.
 
 ## License
 
