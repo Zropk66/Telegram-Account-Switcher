@@ -1,6 +1,3 @@
-# -*- coding: utf-8 -*-
-# @Time : 2025/5/7 13:12
-# @Author : Zropk
 import os
 import sys
 from contextlib import suppress
@@ -11,11 +8,11 @@ from PySide6.QtCore import Qt, QThreadPool, Slot, QPoint
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QMainWindow, QFileDialog, QApplication, QMenu, QDialog
 
-from src.modules.config import ConfigService
-from src.modules import TASConfigException, Logger
+from src.core import TASConfigException, Logger
+from src.core.config import ConfigService
 from src.ui.dialogs import EditLabelDialog, SettingsDialogHelper
-from src.ui.settings_model import AccountListModel
 from src.ui.popup import alert, confirm
+from src.ui.settings_model import AccountListModel
 from src.ui.ui_settings import Ui_setting
 from src.ui.ui_utils import (
     DoubleClickFilter,
@@ -24,6 +21,7 @@ from src.ui.ui_utils import (
 
 
 def open_settings_window(version):
+    """入口函数：创建设置窗口并进入事件循环。"""
     app = QApplication.instance() or QApplication(sys.argv)
     widget = SettingsWindow(version)
     app._settings_window = widget
@@ -32,7 +30,7 @@ def open_settings_window(version):
 
 
 class SettingsController:
-    """中介者：处理 UI 事件背后的业务逻辑"""
+    """处理设置窗口背后的业务逻辑，UI 事件最终都落到这里。"""
 
     def __init__(self, window: 'SettingsWindow'):
         self.window = window
@@ -41,7 +39,7 @@ class SettingsController:
         self.thread_pool = QThreadPool.globalInstance()
 
     def search_client_async(self):
-        """异步搜索客户端"""
+        """在后台线程搜索 Telegram 客户端，找到后自动回填路径。"""
         AsyncTaskRunner.run_search_client(
             self.thread_pool,
             self._on_search_client_finished,
@@ -60,11 +58,12 @@ class SettingsController:
         Logger().error(e.message, popup=True)
 
     def scan_accounts(self, base_path: str):
-        """扫描账户"""
+        """扫描指定路径下的 Telegram 账户并添加到列表。"""
         if not base_path or not Path(base_path).exists():
             alert("请输入有效的 Telegram 客户端路径", "警告", "warning")
             return
 
+        # 首次使用扫描功能需要用户同意解密
         if not self.window.current_configs.get("agreed_to_decrypt", False):
             if not confirm("这是您第一次使用寻找多账号功能。\n使用该功能需要解密该目录下的本地账户数据，您同意继续吗？",
                            "解密确认"):
@@ -96,6 +95,8 @@ class SettingsController:
 
 
 class SettingsWindow(QMainWindow):
+    """设置主窗口，包含客户端路径、账户列表管理等所有设置界面。"""
+
     def __init__(self, version):
         super().__init__()
         self.ui = Ui_setting()
@@ -107,17 +108,17 @@ class SettingsWindow(QMainWindow):
 
         self.ui.version_label.setText(f'TAS v{version}')
 
-        # 客户端设置
+        # 双击客户端输入框可以手动选择
         self.client_edit_double_click_filter = DoubleClickFilter(self.select_client_event)
         self.ui.client_edit.installEventFilter(self.client_edit_double_click_filter)
         self.ui.client_edit.setText(self.current_configs.get('client'))
 
-        # 路径设置
+        # 双击路径输入框可以手动选择
         self.path_edit_double_click_filter = DoubleClickFilter(self.select_path_event)
         self.ui.path_edit.installEventFilter(self.path_edit_double_click_filter)
         self.ui.path_edit.setText(self.current_configs.get('path'))
 
-        # 账号列表加载
+        # 加载已有账户列表
         self.controller.model.load_from_config()
         self.ui.tags_widget.setContextMenuPolicy(Qt.CustomContextMenu)
         self.ui.log_output.setChecked(self.current_configs.get('log_output'))
@@ -192,7 +193,7 @@ class SettingsWindow(QMainWindow):
         self.current_configs['tags'] = self.config.get_all_accounts()
 
     def _handle_edit_dialog_result(self, item, dialog):
-        """处理编辑对话框的结果"""
+        """把编辑对话框的结果同步到模型和配置。"""
         SettingsDialogHelper.handle_edit_dialog_result(
             item,
             dialog,

@@ -1,21 +1,20 @@
-# -*- coding: utf-8 -*-
 from typing import Dict, Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QListWidgetItem, QListWidget
 
-from src.modules.config import ConfigService
+from src.core.config import ConfigService
 
 
 class AccountListModel:
-    """管理账号列表的数据表示层"""
+    """账户列表的数据层，负责列表项的增删改查以及和 ConfigService 的同步。"""
 
     def __init__(self, list_widget: QListWidget, config: ConfigService):
         self.list_widget = list_widget
         self.config = config
 
     def load_from_config(self):
-        """从配置加载账户到列表"""
+        """从配置中读取所有账户，填充到列表控件。"""
         self.list_widget.clear()
         tags_data = self.config.get_all_accounts()
         for tag_name, account_data in tags_data.items():
@@ -27,7 +26,7 @@ class AccountListModel:
         self.refresh_display()
 
     def sync_to_config(self):
-        """从列表同步数据到配置"""
+        """把列表里的数据写回配置，保持两边一致。"""
         new_tags = {}
         for row in range(self.list_widget.count()):
             item = self.list_widget.item(row)
@@ -47,14 +46,14 @@ class AccountListModel:
         self.refresh_display()
 
     def add_account(self, data: Dict[str, Any]):
-        """添加单个账户"""
+        """往列表末尾追加一个账户。"""
         item = QListWidgetItem("")
         item.setData(Qt.UserRole, data)
         self.list_widget.addItem(item)
         self.sync_to_config()
 
     def remove_current(self, sync_callback=None):
-        """删除当前选中账户"""
+        """删除当前选中的账户，返回是否成功。"""
         item = self.list_widget.currentItem()
         if item:
             row = self.list_widget.row(item)
@@ -66,12 +65,12 @@ class AccountListModel:
         return False
 
     def update_item(self, item: QListWidgetItem, data: Dict[str, Any]):
-        """更新列表项数据"""
+        """用新数据替换某个列表项的内容。"""
         item.setData(Qt.UserRole, data)
         self.sync_to_config()
 
     def refresh_display(self, default_tag: str = None):
-        """刷新列表项的显示文本"""
+        """根据数据重新渲染每行的显示文本，默认账户会标注 [默认]。"""
         if not default_tag:
             default_tag = self.config.default
         for row in range(self.list_widget.count()):

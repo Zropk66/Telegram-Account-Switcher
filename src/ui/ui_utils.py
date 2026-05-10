@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 from pathlib import Path
 from typing import Set, Optional
 
@@ -8,7 +7,7 @@ from PySide6.QtWidgets import QStyledItemDelegate, QLineEdit, QListWidget
 
 
 class NonEmptyDelegate(QStyledItemDelegate):
-    """非空文本输入委托"""
+    """列表项编辑委托，不允许输入纯空白。"""
 
     def createEditor(self, parent, option, index):
         editor = QLineEdit(parent)
@@ -19,7 +18,7 @@ class NonEmptyDelegate(QStyledItemDelegate):
 
 
 class NonEmptyValidator(QValidator):
-    """非空文本验证器"""
+    """简单的非空验证器，空白字符会被忽略。"""
 
     def validate(self, input_str, pos):
         input_str = input_str.replace(' ', '')
@@ -27,7 +26,7 @@ class NonEmptyValidator(QValidator):
 
 
 class DoubleClickFilter(QObject):
-    """双击事件过滤器"""
+    """双击事件过滤器，安装到输入框上可以响应双击打开选择器。"""
 
     def __init__(self, callback, target_widget=None):
         super().__init__()
@@ -44,7 +43,7 @@ class DoubleClickFilter(QObject):
 
 
 class AccountScannerHelper:
-    """账户扫描辅助"""
+    """账户扫描时用到的一些静态工具方法。"""
 
     @staticmethod
     def validate_path(base_path: str) -> bool:
@@ -56,6 +55,7 @@ class AccountScannerHelper:
 
     @staticmethod
     def get_existing_folders(list_widget: QListWidget) -> Set[str]:
+        """收集列表中已有账户的文件夹名，扫描时用来去重。"""
         existing_folders = set()
         for i in range(list_widget.count()):
             item = list_widget.item(i)
@@ -66,6 +66,7 @@ class AccountScannerHelper:
 
     @staticmethod
     def write_tag_file(base_path: str, folder_name: str, tag_name: str) -> bool:
+        """在账户文件夹下写入 tas_tag 文件，标记该账户的标签。"""
         try:
             tag_file = Path(base_path) / folder_name / "tas_tag"
             tag_file.write_text(tag_name, encoding="utf-8")
@@ -75,12 +76,12 @@ class AccountScannerHelper:
 
 
 class AsyncTaskRunner:
-    """异步任务执行"""
+    """把耗时操作丢到 QThreadPool 里跑，完成后通过回调通知 UI。"""
 
     @staticmethod
     def run_search_client(thread_pool, finished_callback, error_callback):
         from src.ui.settings_services import TaskRunner
-        from src.modules.env_service import TelegramEnvService
+        from src.core.env_service import TelegramEnvService
 
         def task():
             return TelegramEnvService.search_client()
@@ -92,7 +93,7 @@ class AsyncTaskRunner:
 
 
 class DialogFactory:
-    """UI 对话框工厂"""
+    """集中创建各种对话框，避免在 UI 代码里到处 import。"""
 
     @staticmethod
     def create_edit_label_dialog(

@@ -1,15 +1,14 @@
-# -*- coding: utf-8 -*-
 """
-UI 控制器
+UI 控制器 -- 对外暴露弹窗相关的统一入口。
 
-提供全局 UI 相关的便捷接口。
+旧代码里弹窗有好几个名字（UIController / PopupManager / PopupSignalEmitter），
+这里全部保留为别名，避免破坏已有引用。
 """
 from typing import Literal
 
 from src.ui.popup import Popup, alert, confirm
 
-
-# 保持向后兼容的别名
+# -- 向后兼容的别名 --
 UIController = Popup
 PopupManager = Popup
 PopupSignalEmitter = Popup
@@ -20,27 +19,27 @@ def emit_popup(
     title: str = "提示",
     icon: Literal["info", "warning", "error", "question"] = "info"
 ) -> None:
-    """发出弹窗（向后兼容）"""
+    """弹窗提示（旧接口，新代码请直接用 Popup.alert）。"""
     Popup.alert(message, title, icon)
 
 
 def emit_confirm(message: str, title: str = "确认") -> bool:
-    """发出确认（向后兼容）"""
+    """确认弹窗（旧接口，新代码请直接用 Popup.confirm）。"""
     return Popup.confirm(message, title)
 
 
-# 上下文管理器
+# 上下文管理器别名
 PopupContext = Popup.context
 PopupSession = Popup.context
 
 
 def show_popup(message: str, title: str = "提示", icon: str = "info") -> None:
-    """显示弹窗"""
+    """弹窗提示的另一个别名。"""
     Popup.alert(message, title, icon)
 
 
 def ask_confirm(message: str, title: str = "确认") -> bool:
-    """询问确认"""
+    """确认弹窗的另一个别名。"""
     return Popup.confirm(message, title)
 
 

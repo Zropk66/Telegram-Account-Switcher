@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 from contextlib import suppress
 from pathlib import Path
 from typing import Tuple, Dict, Any
@@ -6,11 +5,11 @@ from typing import Tuple, Dict, Any
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QFileDialog
 
-from src.modules import Logger
+from src.core import Logger
 
 
 class EditLabelDialog(QDialog):
-    """编辑标签对话框"""
+    """编辑 / 新增账户标签的对话框。"""
 
     def __init__(self, user_id: str = "", folder: str = "", tag: str = "",
                  info: str = "", identity: str = "", key: str = "", parent=None):
@@ -78,7 +77,7 @@ class EditLabelDialog(QDialog):
 
 
 class ShowKeyDialog(QDialog):
-    """显示密钥对话框"""
+    """查看 / 编辑账户密钥信息的对话框。"""
 
     def __init__(self, info: str = "", identity: str = "", key: str = "", parent=None):
         super().__init__(parent)
@@ -105,7 +104,7 @@ class ShowKeyDialog(QDialog):
 
 
 class SettingsDialogHelper:
-    """设置对话框辅助功能"""
+    """把编辑对话框的返回值写回到列表模型和配置里，避免逻辑散落在 SettingsWindow 中。"""
 
     @staticmethod
     def handle_edit_dialog_result(
@@ -119,14 +118,15 @@ class SettingsDialogHelper:
         config_manage=None,
         refresh_display_callback=None
     ):
-        """处理编辑对话框的结果"""
         id_val, folder, info, identity, key, tag = dialog.get_account_data()
 
+        # 设为默认账户
         if dialog.is_default:
             if config_manage:
                 config_manage.default = tag
             update_config_callback('default', tag)
 
+        # 如果路径是相对路径，基于基础路径创建文件夹并写入标签文件
         if folder and tag:
             with suppress(Exception):
                 base = Path(path_edit_text.strip())
@@ -137,6 +137,7 @@ class SettingsDialogHelper:
 
         new_data = {'tag': tag, 'id': id_val, 'folder': folder, 'info': info, 'identity': identity, 'key': key}
 
+        # 编辑已有项 or 新增
         old_tag = None
         if item:
             item_data = item.data(Qt.UserRole)
@@ -145,10 +146,11 @@ class SettingsDialogHelper:
             model_update_callback(item, new_data)
         else:
             model_add_callback(new_data)
-        
+
+        # 如果改了默认账户的标签名，同步更新 default 字段
         if old_tag and not dialog.is_default and old_tag == current_configs.get('default'):
             update_config_callback('default', tag)
-        
+
         update_config_callback('tags', config_manage.get_all_accounts() if config_manage else {})
 
         if dialog.is_default and refresh_display_callback:

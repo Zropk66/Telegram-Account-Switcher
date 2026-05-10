@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import asyncio
 import atexit
 import signal
@@ -7,38 +6,40 @@ import threading
 from contextlib import suppress
 from pathlib import Path
 
-from src.modules import (
+from src.core import (
     AccountSwitcher,
     ProcessManager,
     ProcessMonitor,
     recovery,
     Logger,
 )
-from src.modules.cli_controller import CLIController
-from src.modules.config import (
+from src.core.cli_controller import CLIController
+from src.core.config import (
     ConfigService,
     ConfigData,
 )
-from src.modules.config.key_manager import TelegramKeyManager
-from src.modules.logger import set_popup_handler, set_config_provider
+from src.core.config.key_manager import TelegramKeyManager
+from src.core.event_bus import (
+    AppCompletionEvent,
+    event_bus,
+    APP_COMPLETION,
+)
+from src.core.logger import set_popup_handler, set_config_provider
 from src.ui.adapters import create_cli_callbacks, create_popup_handler
-from src.ui.settings_ui import open_settings_window
 from src.ui.popup import Popup
+from src.ui.settings_ui import open_settings_window
 
-# ========== 全局变量 ==========
+# -- 全局状态 --
 logger: Logger
 CONFIG: ConfigService
 TITLE = "TAS"
-VERSION = "1.3.0"
+VERSION = "2.0.0"
 
 
 def setup_dependency_injection():
-    """
-    设置依赖注入
-    """
+    """把配置提供者和日志处理器注入到各模块，建立依赖关系。"""
     global logger
 
-    # 1. 注入配置提供者到 Logger
     config_provider = ConfigData.as_provider()
     set_config_provider(config_provider)
 
@@ -56,7 +57,7 @@ def setup_dependency_injection():
 
 
 def create_logger_with_popup() -> Logger:
-    """创建带弹窗功能的Logger"""
+    """创建 Logger 实例，并挂载弹窗处理器。"""
     new_logger = Logger()
     popup_handler = create_popup_handler()
     set_popup_handler(popup_handler)
@@ -64,7 +65,7 @@ def create_logger_with_popup() -> Logger:
 
 
 def create_cli_controller(version: str) -> CLIController:
-    """创建CLIController"""
+    """构建 CLIController，注入所有 UI 回调。"""
     callbacks = create_cli_callbacks()
     return CLIController(
         version=version,
@@ -77,7 +78,7 @@ def create_cli_controller(version: str) -> CLIController:
 
 
 class TASApp:
-    """TAS 应用程序生命周期管理器"""
+    """管理应用的整体生命周期：初始化 → 切换账户 → 监控 → 退出清理。"""
 
     def __init__(self, version: str):
         from PySide6.QtWidgets import QApplication
@@ -101,15 +102,22 @@ class TASApp:
         log_and_exit(mark=True)
 
     async def _watcher_task(self):
-        """运行进程健康监控"""
-        self.monitor.add_callback(status_handler)
+        """在后台持续监控进程状态，直到收到任务完成事件。"""
         await self.monitor.start_watching()
-        while not CONFIG.complete:
-            await asyncio.sleep(1)
+        completion_event = asyncio.Event()
+
+        def on_completion(payload: AppCompletionEvent):
+            completion_event.set()
+
+        event_bus.subscribe(APP_COMPLETION, on_completion)
+        try:
+            await completion_event.wait()
+        finally:
+            event_bus.unsubscribe(APP_COMPLETION, on_completion)
         await self.monitor.stop_watching()
 
     def start_monitoring(self):
-        """启动监控线程"""
+        """在新线程中启动进程监控。"""
         self.loop = asyncio.new_event_loop()
         self.monitor = ProcessMonitor(CONFIG.client)
         self._monitor_thread = threading.Thread(
@@ -121,7 +129,7 @@ class TASApp:
         self._monitor_thread.start()
 
     def _join_monitor_thread(self, timeout: float = 5):
-        """等待监控线程自然退出，超时则强制关闭事件循环"""
+        """等监控线程结束，超时就强行关闭事件循环。"""
         if self._monitor_thread is not None and self._monitor_thread.is_alive():
             self._monitor_thread.join(timeout=timeout)
             if self._monitor_thread.is_alive() and self.loop is not None and not self.loop.is_closed():
@@ -132,7 +140,7 @@ class TASApp:
         self.loop = None
 
     def run(self):
-        """运行主逻辑"""
+        """应用主流程：解析参数 → 校验配置 → 切换账户 → 等待完成。"""
         try:
             args = self.cli_controller.parse_args()
         except Exception:
@@ -154,8 +162,7 @@ class TASApp:
 
         def wrapped_confirm(msg):
             with Popup.context():
-                Popup.confirm(msg, "账户切换确认")
-            return
+                return Popup.confirm(msg, "账户切换确认")
 
         switched = AccountSwitcher().process(confirm_callback=wrapped_confirm)
 
@@ -167,17 +174,24 @@ class TASApp:
 
     @staticmethod
     def _wait_for_completion():
-        """等待监控完成"""
-        import time
-        while not CONFIG.complete:
-            time.sleep(0.5)
+        """阻塞等待 AppCompletionEvent，替代旧的轮询方式。"""
+        completion_event = threading.Event()
+
+        def on_completion(payload: AppCompletionEvent):
+            completion_event.set()
+
+        event_bus.subscribe(APP_COMPLETION, on_completion)
+        try:
+            completion_event.wait()
+        finally:
+            event_bus.unsubscribe(APP_COMPLETION, on_completion)
 
 
 _cleanup_done = False
 
 
 def log_and_exit(mark=False):
-    """程序退出清理"""
+    """退出前的清理工作：恢复默认账户、记录运行时长。"""
     global _cleanup_done
     if mark and _cleanup_done:
         return None
@@ -194,8 +208,7 @@ def log_and_exit(mark=False):
 
 
 def register_signal_handlers():
-    """注册信号监听"""
-
+    """监听 Ctrl+C，优雅退出。"""
     def handle_interrupt(signum, frame):
         log_and_exit(True)
         sys.exit(0)
@@ -204,7 +217,7 @@ def register_signal_handlers():
 
 
 def handle_global_exception(exc_type, exc_value, exc_traceback):
-    """全局异常捕获"""
+    """兜底捕获未处理的异常，弹窗提示用户。"""
     if exc_type in (KeyboardInterrupt, SystemExit):
         sys.exit(0)
     if logger:
@@ -215,11 +228,8 @@ def handle_global_exception(exc_type, exc_value, exc_traceback):
         )
 
 
-async def status_handler(is_alive: bool) -> None:
-    CONFIG.process_status = is_alive
-
-
 def run_async_in_thread(loop, coro) -> None:
+    """在独立线程中运行 asyncio 事件循环。"""
     asyncio.set_event_loop(loop)
     try:
         loop.run_until_complete(coro)
@@ -235,7 +245,7 @@ def run_async_in_thread(loop, coro) -> None:
 
 
 def main():
-    """主入口"""
+    """程序入口。"""
     global logger, CONFIG
 
     setup_dependency_injection()

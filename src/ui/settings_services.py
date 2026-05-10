@@ -1,11 +1,11 @@
-# -*- coding: utf-8 -*-
 from PySide6.QtCore import QObject, Signal, QRunnable, Slot
 
-from src.modules import TASException
+from src.core import TASException
 
 
 class SignalsEmitter(QObject):
-    """通用的信号发射器"""
+    """通用的信号集合，TaskRunner 通过它把结果或异常传回主线程。"""
+
     finished = Signal(object)
     warning = Signal(object)
     error = Signal(object)
@@ -14,7 +14,7 @@ class SignalsEmitter(QObject):
 
 
 class TaskRunner(QRunnable):
-    """异步任务执行器"""
+    """在 QThreadPool 中执行一个函数，结果通过信号发回 UI 线程。"""
 
     def __init__(self, func):
         super().__init__()

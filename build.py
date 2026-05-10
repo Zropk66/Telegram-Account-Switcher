@@ -1,3 +1,4 @@
+"""用 Nuitka 把 TAS 打包成单个可执行文件。"""
 import subprocess
 import sys
 import time

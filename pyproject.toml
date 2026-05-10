@@ -1,6 +1,6 @@
 [project]
 name = "telegram-account-switcher"
-version = "1.3.0"
+version = "2.0.0"
 description = "Telegram Account Switcher Project!"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -11,5 +11,6 @@ dependencies = [
     "psutil>=7.2.1",
     "pyside6>=6.11.0",
     "tgcrypto>=1.2.5",
+    "watchdog>=6.0.0",
     "zstandard>=0.25.0",
 ]

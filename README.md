@@ -2,7 +2,7 @@
 
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
 ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)
-![Version](https://img.shields.io/badge/Latest-v1.3.0-brightgreen)
+![Version](https://img.shields.io/badge/Latest-v2.0.0-brightgreen)
 ![License](https://img.shields.io/github/license/Zropk66/Telegram-Account-Switcher)
 
 一个用于在 Windows 上快速切换和管理多个 Telegram 账户的工具。
@@ -30,6 +30,8 @@ cd Telegram-Account-Switcher
 uv sync
 
 # 打包程序
+python build.py
+# 或直接使用 nuitka
 nuitka --mingw64 --standalone --onefile --windows-console-mode=disable --plugin-enable=pyside6 --output-filename=TAS --output-dir=output --remove-output --lto=yes .\launcher.py
 
 # 运行程序
@@ -46,6 +48,7 @@ python TAS.exe
 | --settings       | -c       | 打开设置窗口   | `TAS.exe -c`                     |
 | --switch [TAG]   | -s [TAG] | 切换到指定账户  | `TAS.exe -s tag1`                |
 | --tag [TAG]      | -t [TAG] | 指定要操作的标签 | `TAS.exe -e -t tag1 -p password` |
+| --key-login      | -k       | 强制Key登录  | `TAS.exe -s tag1 -k`             |
 | --encrypt        | -e       | 加密所有账户数据 | `TAS.exe -e -p password`         |
 | --decrypt        | -d       | 解密所有账户数据 | `TAS.exe -d -p password`         |
 | --password [PWD] | -p [PWD] | 指定加密密码   | `TAS.exe -s tag1 -p password`    |
@@ -56,14 +59,19 @@ python TAS.exe
 
 ```
 Telegram/
-├── tdata/              # 当前使用的账户
-│   └── main/           # 默认账户文件夹
-├── tag1/               # 标签账户1
-│   └── key_datas       # 加密的账户数据
-├── tag2/               # 标签账户2
-│   └── key_datas
-└── order_files         # 账户配置文件
+├── tdata/                  # 当前使用的活跃账户
+│   ├── tas_tag             # 标签标识文件（内容为 tag 名称）
+│   ├── key_datas/          # 账户密钥数据
+│   ├── D877F783D5D3EF8Cs/  # 账户身份数据
+│   └── D877F783D5D3EF8C/   # 账户设置数据
+├── tdata-2/                # 其他账户（名称任意）
+│   ├── tas_tag             # 标签标识文件（内容为对应的 tag 名称）
+│   ├── key_datas/          # 加密的账户数据
+│   └── ...
+└── ...
 ```
+
+> 每个账户文件夹内都有一个 `tas_tag` 文件，其内容即为该账户的标签名称。程序通过读取 `tas_tag` 来识别账户，而非依赖文件夹名。
 
 ### 基本操作
 
