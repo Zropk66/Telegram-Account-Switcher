@@ -26,6 +26,10 @@ def build_args() -> list[str]:
         "--output-dir=output",
         "--show-progress",
         "--jobs=8",
+        "--windows-product-name=TAS",
+        f"--windows-product-version={VERSION}",
+        f"--windows-file-version={VERSION}",
+        "--windows-file-description=Telegram Account Switcher",
     ]
     args.extend(common_args)
 

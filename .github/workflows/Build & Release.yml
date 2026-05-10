@@ -74,7 +74,7 @@ jobs:
       - name: Compile with Nuitka
         run: |
           $COMPILER_FLAG = if ("${{ matrix.compiler }}" -eq "mingw") { "--mingw64" } else { "" }
-          uv run python -m nuitka $COMPILER_FLAG --onefile-no-compression --assume-yes-for-downloads --standalone --onefile --windows-console-mode=disable --plugin-enable=upx --plugin-enable=pyside6 --output-filename=${{ env.OUTPUT_NAME }} --output-dir=output --remove-output --lto=yes .\launcher.py
+          uv run python -m nuitka $COMPILER_FLAG --onefile-no-compression --assume-yes-for-downloads --standalone --onefile --windows-console-mode=disable --plugin-enable=upx --plugin-enable=pyside6 --output-filename=${{ env.OUTPUT_NAME }} --output-dir=output --remove-output --lto=yes --windows-product-name=TAS --windows-product-version=${{ env.VERSION }} --windows-file-version=${{ env.VERSION }} --windows-file-description="Telegram Account Switcher" .\launcher.py
         shell: pwsh
 
       - name: Upload Artifact

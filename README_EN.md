@@ -32,7 +32,7 @@ uv sync
 # Build the program
 python build.py
 # Or use nuitka directly
-nuitka --mingw64 --standalone --onefile --windows-console-mode=disable --plugin-enable=pyside6 --output-filename=TAS --output-dir=output --remove-output --lto=yes .\launcher.py
+nuitka --mingw64 --standalone --onefile --windows-console-mode=disable --plugin-enable=pyside6 --output-filename=TAS --output-dir=output --remove-output --lto=yes --windows-product-name=TAS --windows-product-version=2.0.0 --windows-file-version=2.0.0 --windows-file-description="Telegram Account Switcher" .\launcher.py
 
 # Run the program
 python TAS.exe
