@@ -132,7 +132,7 @@ The first run will automatically create a `configs.json` configuration file:
 
 ## System Resources
 
-- **Memory Usage**: ~40MB idle, ~70MB during account switching
+- **Memory Usage**: ~40MB idle
 - **Disk Space**: ~1-2MB per account
 
 ## Troubleshooting

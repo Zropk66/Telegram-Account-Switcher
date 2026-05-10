@@ -49,6 +49,7 @@ python TAS.exe
 | --switch [TAG]   | -s [TAG] | 切换到指定账户  | `TAS.exe -s tag1`                |
 | --tag [TAG]      | -t [TAG] | 指定要操作的标签 | `TAS.exe -e -t tag1 -p password` |
 | --key-login      | -k       | 强制Key登录  | `TAS.exe -s tag1 -k`             |
+| --help           | -h       | 查看帮助     | `TAS.exe -h`                     |
 | --encrypt        | -e       | 加密所有账户数据 | `TAS.exe -e -p password`         |
 | --decrypt        | -d       | 解密所有账户数据 | `TAS.exe -d -p password`         |
 | --password [PWD] | -p [PWD] | 指定加密密码   | `TAS.exe -s tag1 -p password`    |
@@ -131,7 +132,7 @@ TAS.exe -d -p [密码]
 
 ## 系统资源
 
-- **内存占用**：运行时空闲约 40MB，账户切换时约 70MB
+- **内存占用**：运行时内存占用约 40MB
 - **磁盘空间**：单个账户数据约 1-2MB
 
 ## 故障排除
