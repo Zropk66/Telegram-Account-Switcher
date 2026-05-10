@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import atexit
+import ctypes
 import subprocess
 import time
 from contextlib import suppress, contextmanager
@@ -8,10 +9,20 @@ from pathlib import Path
 from typing import Callable, Generator, Optional
 
 import psutil
+from ctypes import wintypes
 
 from src.modules.config import ConfigService
 from src.modules.exceptions import TASException
 from src.modules.logger import Logger
+
+# Windows API 常量
+_SYNCHRONIZE = 0x00100000
+_WAIT_OBJECT_0 = 0
+_WAIT_TIMEOUT = 0x00000102
+_WAIT_FAILED = 0xFFFFFFFF
+_INVALID_HANDLE_VALUE = -1
+
+kernel32 = ctypes.windll.kernel32
 
 
 class ProcessManager:
@@ -121,6 +132,13 @@ class ProcessManager:
 
 
 class ProcessMonitor:
+    """
+    使用 Windows 事件驱动的进程监控。
+
+    进程运行时通过 WaitForSingleObject 阻塞等待进程退出，零 CPU 开销；
+    进程不存在时短暂轮询等待进程启动。
+    """
+
     def __init__(self, process_name: str, *, check_interval: float = 0.5):
         self.process_name = process_name
         self._callbacks = []
@@ -155,11 +173,16 @@ class ProcessMonitor:
                 await self._watch_task
 
     async def _watch(self):
-        """监控主循环"""
+        """监控主循环 —— 事件驱动"""
         last_status = None
+        loop = asyncio.get_running_loop()
+
         while True:
             try:
-                current_status = await self._check_status()
+                # 在线程池中执行阻塞的进程查找与等待
+                current_status = await loop.run_in_executor(
+                    None, self._wait_for_process_change, last_status
+                )
 
                 if current_status != last_status:
                     for callback in self._callbacks:
@@ -169,43 +192,69 @@ class ProcessMonitor:
                             self.logger.exception(f"回调执行失败", e)
                     last_status = current_status
 
-                await asyncio.sleep(self.check_interval)
             except asyncio.CancelledError:
                 raise
             except Exception as e:
                 self.logger.exception(f"监控错误", e)
                 await asyncio.sleep(5)
 
-    async def _check_status(self) -> bool:
-        """检查进程状态"""
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self._status_checker, self.process_name)
+    def _wait_for_process_change(self, last_status: bool) -> bool:
+        """
+        在工作线程中执行：查找进程并事件驱动等待状态变化。
 
-    def _status_checker(self, process_name: str) -> bool:
-        """进程状态检查器"""
+        - 进程运行中 → WaitForSingleObject 阻塞直到退出（事件驱动）
+        - 进程不存在 → 短暂轮询等待进程启动
+        返回当前进程存活状态。
+        """
+        # ---- 进程正在运行，等待它退出 ----
+        if last_status and self.last_PID:
+            handle = kernel32.OpenProcess(
+                wintypes.DWORD(_SYNCHRONIZE),
+                wintypes.BOOL(False),
+                wintypes.DWORD(self.last_PID),
+            )
+            if handle and handle != _INVALID_HANDLE_VALUE:
+                try:
+                    # 事件驱动等待：进程退出时立即返回 WAIT_OBJECT_0
+                    # 超时 1 秒用于让主循环有机会检查 CancelledError
+                    result = kernel32.WaitForSingleObject(handle, wintypes.DWORD(1000))
+                    if result == _WAIT_OBJECT_0:
+                        self.last_PID = None
+                        return False  # 进程已退出
+                    elif result == _WAIT_TIMEOUT:
+                        return True  # 进程仍在运行，返回让主循环检查取消
+                    # WAIT_FAILED 或其他：句柄可能失效，走下面的重新查找逻辑
+                finally:
+                    kernel32.CloseHandle(handle)
+
+        # ---- 进程不存在或句柄失效，轮询等待进程启动 ----
+        pid = self._find_process_id()
+        if pid is not None:
+            self.last_PID = pid
+            return True  # 进程已启动
+
+        # 进程仍未出现，短暂休眠后返回 False
+        time.sleep(self.check_interval)
+        return False
+
+    def _find_process_id(self) -> Optional[int]:
+        """查找目标进程的 PID，优先复用 last_PID"""
         try:
             with suppress(psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 if self.last_PID:
                     process = psutil.Process(self.last_PID)
-                    if process.is_running() and process.name() == process_name:
-                        return True
+                    if process.is_running() and process.name() == self.process_name:
+                        return self.last_PID
 
             for proc in psutil.process_iter(['name', 'pid']):
                 try:
-                    proc_name = proc.info.get('name')
-                    if proc_name == process_name:
-                        self.last_PID = proc.pid
-                        return True
-                except (
-                        psutil.NoSuchProcess,
-                        psutil.AccessDenied,
-                        psutil.ZombieProcess,
-                ):
+                    if proc.info.get('name') == self.process_name:
+                        return proc.pid
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                     continue
-            return False
         except Exception as e:
-            self.logger.exception(f"检查进程状态时出现错误.", e)
-            return False
+            self.logger.exception(f"查找进程时出现错误", e)
+        return None
 
 
 # 注册退出时清理 Popen 引用，防止僵尸进程
