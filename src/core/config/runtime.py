@@ -16,7 +16,7 @@ class RuntimeState:
     tag: str = ""
     force_key_login: bool = False
     decrypted: bool = False
-    password: str = ""  # TODO: 考虑用更安全的方式存储
+    password: str = ""
     has_backup: bool = False
 
     def reset(self) -> None:
