@@ -11,7 +11,7 @@ from src.core.event_bus import (
     ProcessStatusChanged,
     AccountLoginDetected,
     AppCompletionEvent,
-    event_bus,
+    get_event_bus,
     PROCESS_STATUS_CHANGED,
     ACCOUNT_LOGIN_DETECTED,
     APP_COMPLETION,
@@ -118,7 +118,7 @@ class AccountMonitor:
             self._process_alive = payload.is_alive
             self._wake_event.set()
 
-        event_bus.subscribe(PROCESS_STATUS_CHANGED, on_process_status)
+        get_event_bus().subscribe(PROCESS_STATUS_CHANGED, on_process_status)
 
         try:
             while True:
@@ -136,7 +136,7 @@ class AccountMonitor:
                             is_logged_in = True
                             self.config.start_time = datetime.now()
                             monitor_started = True
-                            event_bus.publish(Event(
+                            get_event_bus().publish(Event(
                                 ACCOUNT_LOGIN_DETECTED,
                                 AccountLoginDetected(tag=self.tag or self.config.default),
                             ))
@@ -158,12 +158,12 @@ class AccountMonitor:
         except Exception as e:
             self.logger.exception("状态监控线程异常", e)
         finally:
-            event_bus.unsubscribe(PROCESS_STATUS_CHANGED, on_process_status)
+            get_event_bus().unsubscribe(PROCESS_STATUS_CHANGED, on_process_status)
             if self._observer:
                 self._observer.stop()
                 self._observer.join(timeout=2)
             self.config.sync_all_account_paths()
-            event_bus.publish(Event(
+            get_event_bus().publish(Event(
                 APP_COMPLETION,
                 AppCompletionEvent(success=True, message="账户切换完成"),
             ))

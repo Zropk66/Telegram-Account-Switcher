@@ -21,7 +21,7 @@ from src.core.config import (
 from src.core.config.key_manager import TelegramKeyManager
 from src.core.event_bus import (
     AppCompletionEvent,
-    event_bus,
+    get_event_bus,
     APP_COMPLETION,
 )
 from src.core.logger import set_popup_handler, set_config_provider
@@ -109,11 +109,11 @@ class TASApp:
         def on_completion(payload: AppCompletionEvent):
             completion_event.set()
 
-        event_bus.subscribe(APP_COMPLETION, on_completion)
+        get_event_bus().subscribe(APP_COMPLETION, on_completion)
         try:
             await completion_event.wait()
         finally:
-            event_bus.unsubscribe(APP_COMPLETION, on_completion)
+            get_event_bus().unsubscribe(APP_COMPLETION, on_completion)
         await self.monitor.stop_watching()
 
     def start_monitoring(self):
@@ -180,11 +180,11 @@ class TASApp:
         def on_completion(payload: AppCompletionEvent):
             completion_event.set()
 
-        event_bus.subscribe(APP_COMPLETION, on_completion)
+        get_event_bus().subscribe(APP_COMPLETION, on_completion)
         try:
             completion_event.wait()
         finally:
-            event_bus.unsubscribe(APP_COMPLETION, on_completion)
+            get_event_bus().unsubscribe(APP_COMPLETION, on_completion)
 
 
 _cleanup_done = False
@@ -209,6 +209,7 @@ def log_and_exit(mark=False):
 
 def register_signal_handlers():
     """监听 Ctrl+C，优雅退出。"""
+
     def handle_interrupt(signum, frame):
         log_and_exit(True)
         sys.exit(0)

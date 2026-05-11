@@ -51,19 +51,20 @@ class ConfigService:
         return cls._instance
 
     def __init__(self):
-        if self.__initialized:
-            return
+        with self._lock:
+            if self.__initialized:
+                return
 
-        self._runtime = RuntimeState()
-        self._storage = ConfigStorage(
-            config_path=ConfigData.path(),
-            default_config=self._DEFAULT_CONFIG,
-            error_handler=self._error_handler
-        )
-        self._config = self._storage.load()
+            self._runtime = RuntimeState()
+            self._storage = ConfigStorage(
+                config_path=ConfigData.path(),
+                default_config=self._DEFAULT_CONFIG,
+                error_handler=self._error_handler
+            )
+            self._config = self._storage.load()
 
-        self.__initialized = True
-        self._storage.start_auto_save(self)
+            self.__initialized = True
+            self._storage.start_auto_save(self)
 
     def _error_handler(self, message: str) -> None:
         """存储层回调上来的错误，转发给日志处理器"""

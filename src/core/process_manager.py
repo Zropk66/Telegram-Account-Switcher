@@ -15,7 +15,7 @@ from src.core.config import ConfigService
 from src.core.event_bus import (
     Event,
     ProcessStatusChanged,
-    event_bus,
+    get_event_bus,
     PROCESS_STATUS_CHANGED,
 )
 from src.core.exceptions import TASException
@@ -87,7 +87,7 @@ class ProcessManager:
                 if payload.is_alive:
                     ready_event.set()
 
-            event_bus.subscribe(PROCESS_STATUS_CHANGED, on_process_status)
+            get_event_bus().subscribe(PROCESS_STATUS_CHANGED, on_process_status)
             try:
                 proc = subprocess.Popen(
                     args=str(full_path),
@@ -101,7 +101,7 @@ class ProcessManager:
 
                 success = ready_event.wait(timeout=max_time)
             finally:
-                event_bus.unsubscribe(PROCESS_STATUS_CHANGED, on_process_status)
+                get_event_bus().unsubscribe(PROCESS_STATUS_CHANGED, on_process_status)
 
             return success
 
@@ -196,7 +196,7 @@ class ProcessMonitor:
                 )
 
                 if current_status != last_status:
-                    event_bus.publish(Event(
+                    get_event_bus().publish(Event(
                         PROCESS_STATUS_CHANGED,
                         ProcessStatusChanged(
                             is_alive=current_status,

@@ -16,7 +16,7 @@ from typing import Dict, Any, TYPE_CHECKING, Optional, Callable
 
 from src.core.event_bus import (
     AppCompletionEvent,
-    event_bus,
+    get_event_bus,
     APP_COMPLETION,
 )
 
@@ -104,7 +104,7 @@ class ConfigStorage:
         def on_completion(payload: AppCompletionEvent):
             completion_event.set()
 
-        event_bus.subscribe(APP_COMPLETION, on_completion)
+        get_event_bus().subscribe(APP_COMPLETION, on_completion)
 
         def auto_save_worker():
             while self._save_thread_running:
@@ -114,7 +114,7 @@ class ConfigStorage:
                 if completion_event.is_set():
                     break
                 time.sleep(5)
-            event_bus.unsubscribe(APP_COMPLETION, on_completion)
+            get_event_bus().unsubscribe(APP_COMPLETION, on_completion)
 
         self._save_thread = Thread(target=auto_save_worker, daemon=True)
         self._save_thread.start()
