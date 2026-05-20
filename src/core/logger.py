@@ -9,7 +9,6 @@ from contextlib import suppress
 from typing import Any, Callable, Optional, Protocol
 
 from loguru import logger as loguru_logger
-from src.core.interfaces import ILogger
 
 PopupHandler = Callable[[str, str, str], None]
 
@@ -85,7 +84,7 @@ def _setup_popup_bridge():
     loguru_logger.add(popup_sink, filter=lambda r: r["extra"].get("popup", False))
 
 
-class Logger(ILogger):
+class Logger:
     """日志管理器。"""
     _instance = None
     _lock = threading.Lock()
