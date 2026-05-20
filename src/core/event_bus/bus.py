@@ -14,10 +14,9 @@ from contextvars import ContextVar
 from threading import Lock
 from typing import Callable, Optional, TYPE_CHECKING
 
-from src.core.interfaces import ILogger
-
 if TYPE_CHECKING:
     from core.event_bus.events import Event
+    from src.core.logger import Logger
 
 _event_bus_ctx: ContextVar[Optional["EventBus"]] = ContextVar("event_bus", default=None)
 _event_bus_lock = Lock()
@@ -27,7 +26,7 @@ _event_bus_instance: Optional["EventBus"] = None
 class EventBus:
     """进程内的消息中转站。"""
 
-    def __init__(self, logger: Optional[ILogger] = None):
+    def __init__(self, logger: Optional[\"Logger\"] = None):
         """初始化。"""
         self._subscribers: dict[str, list[Callable]] = defaultdict(list)
         self._lock = Lock()
