@@ -11,10 +11,10 @@ from typing import Dict, Any, Tuple
 
 from src.core.crypto_service import AccountDataCryptoService
 from src.core.exceptions import TASException
-from src.core.interfaces import IEnvService
+from src.core.exceptions import TASException
 
 
-class TelegramEnvService(IEnvService):
+class TelegramEnvService:
     """负责 OS 级环境配置读取与账户目录扫描的服务类。"""
 
     @staticmethod
