@@ -1,41 +1,35 @@
-"""
-Telegram 密钥的备份与恢复
+"""Telegram 密钥的备份与恢复，通过 base64 编码存储密钥文件实现免密登录。"""
 
-把 tdata 目录下的 identity / info / key 三个文件
-以 base64 编码存进配置，需要时再写回磁盘来模拟登录状态。
-"""
 import base64
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, Callable
+from typing import Optional, Callable
 
+from src.core.interfaces import IKeyManager, IConfigProvider
 from .config import PathConfig
 
-if TYPE_CHECKING:
-    from .service import ConfigService
 
-
-class TelegramKeyManager:
-    """密钥读写逻辑，全部是静态方法，按需调用即可"""
+class TelegramKeyManager(IKeyManager):
+    """Telegram 账户密钥的备份和恢复，所有方法均为静态方法。"""
 
     _log_handler: Optional[Callable[[str], None]] = None
 
     @classmethod
     def set_log_handler(cls, handler: Optional[Callable[[str], None]]) -> None:
-        """注入外部日志处理器，传 None 则清除。"""
+        """设置日志处理器，传入 None 则清除。"""
         cls._log_handler = handler
 
     @classmethod
     def _log_error(cls, message: str) -> None:
-        """内部用的错误日志，处理器挂了就静默"""
+        """通过 _log_handler 输出错误日志，处理器异常时静默忽略。"""
         if cls._log_handler:
             try:
                 cls._log_handler(message)
-            except Exception:
+            except (RuntimeError, TypeError):
                 pass
 
     @staticmethod
-    def backup_keys(tag: str, folder_path: Path, config_service: 'ConfigService') -> bool:
-        """从 tdata 目录读取密钥文件并 base64 编码后存进配置，返回是否备份成功。"""
+    def backup_keys(tag: str, folder_path: Path, config_service: IConfigProvider) -> bool:
+        """从 tdata 目录读取密钥文件，base64 编码后存入配置。"""
         try:
             identity_path = PathConfig.get_identity_path(folder_path)
             info_path = PathConfig.get_info_path(folder_path)
@@ -59,8 +53,8 @@ class TelegramKeyManager:
             return False
 
     @staticmethod
-    def login_with_keys(tag: str, tdata_path: str, config_service: 'ConfigService') -> bool:
-        """把配置里存的密钥写回 tdata 目录实现免密登录，返回是否写入成功。"""
+    def login_with_keys(tag: str, tdata_path: str, config_service: IConfigProvider) -> bool:
+        """从配置中读取密钥，解码后写入 tdata 目录实现免密登录。"""
         if not config_service.has_complete_keys(tag):
             return False
 
@@ -84,6 +78,6 @@ class TelegramKeyManager:
             except (OSError, ValueError):
                 return False
 
-        except Exception:
+        except (OSError, RuntimeError):
             TelegramKeyManager._log_error("Key登录失败")
             return False

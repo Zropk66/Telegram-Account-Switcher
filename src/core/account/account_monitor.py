@@ -1,7 +1,15 @@
+"""
+后台监视 Telegram 运行状态，处理登录检测与进程生命周期管理。
+
+通过监控文件系统事件和进程状态，在 Telegram 登录成功或退出时触发对应操作，
+实现自动化的账户切换、密钥同步与现场恢复。
+"""
+
 import threading
 from datetime import datetime
 from pathlib import Path
 
+import psutil
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
@@ -16,23 +24,25 @@ from src.core.event_bus import (
     ACCOUNT_LOGIN_DETECTED,
     APP_COMPLETION,
 )
-from src.core.logger import Logger
+from src.core.interfaces import IConfigProvider, ILogger
 
 
 class _ConfigsFileHandler(FileSystemEventHandler):
-    """用 watchdog 监听 configs 文件变化，作为登录检测的快速路径。
+    """
+    监控 `configs` 文件的变动。
 
-    当 configs 文件被修改/创建/删除/移动时，立即唤醒监控循环，
-    避免纯轮询带来的延迟。
+    Telegram 登录成功后会修改该文件，以此作为检测登录成功的非侵入式触发器。
     """
 
     def __init__(self, target_file: Path, wake_event: threading.Event, login_flag: list):
+        """初始化。"""
         super().__init__()
         self._target_name = target_file.name
         self._wake_event = wake_event
         self._login_flag = login_flag
 
     def _match(self, event) -> bool:
+        """判断文件事件是否针对目标配置文件。"""
         if event.is_directory:
             return False
         try:
@@ -41,20 +51,26 @@ class _ConfigsFileHandler(FileSystemEventHandler):
             return False
 
     def _on_file_event(self, event):
+        """内部方法：_on_file_event。"""
         if self._match(event):
             self._login_flag[0] = True
+            # 唤醒等待中的监控线程
             self._wake_event.set()
 
     def on_modified(self, event):
+        """on_modified 方法。"""
         self._on_file_event(event)
 
     def on_created(self, event):
+        """on_created 方法。"""
         self._on_file_event(event)
 
     def on_deleted(self, event):
+        """on_deleted 方法。"""
         self._on_file_event(event)
 
     def on_moved(self, event):
+        """on_moved 方法。"""
         if not event.is_directory:
             try:
                 if Path(event.dest_path).name == self._target_name:
@@ -65,34 +81,31 @@ class _ConfigsFileHandler(FileSystemEventHandler):
 
 
 class AccountMonitor:
-    """后台监控线程，负责两件事：
-
-    1. 检测登录：watchdog 监听 configs 文件（快速路径）+ mtime 兜底检查
-    2. 监听进程退出：通过 EventBus 的 process.status_changed 事件驱动
-
-    进程关闭后自动恢复默认账户，并根据使用时长决定是否同步密钥。
+    """
+    负责账户生命周期的后台监控逻辑。
     """
 
-    # mtime 兜底检查间隔（秒）
+    # Watchdog 故障时的兜底轮询间隔
     _MTIME_CHECK_INTERVAL = 2.0
 
-    def __init__(self, tag: str, check_tag: str | None, config_manage, logger: Logger, spawn_time: datetime | None = None):
+    def __init__(self, tag: str, check_tag: str | None, config_manage: IConfigProvider, logger: ILogger,
+                 spawn_time: datetime | None = None):
+        """初始化。"""
         self.tag = tag
         self.check_tag = check_tag
         self.config = config_manage
         self.logger = logger
         self.spawn_time = spawn_time or datetime.now()
+        # 定位 Telegram 内部存储配置的路径
         self.configs_file = Path(config_manage.path) / "tdata" / "D877F783D5D3EF8C" / "configs"
 
-        # 共享唤醒事件，watchdog 和 EventBus 都可以触发
         self._wake_event = threading.Event()
-        # AccountMonitor 仅在进程启动成功后创建，初始状态必然是存活的
         self._process_alive = True
         self._login_detected = [False]
         self._observer: Observer | None = None
 
     def _check_mtime(self) -> bool:
-        """兜底检查：直接看 configs 文件的 mtime 是否在进程启动之后被修改过。"""
+        """基于文件修改时间戳确认是否发生过登录（写入）。"""
         try:
             if self.configs_file.exists():
                 return self.configs_file.stat().st_mtime >= self.spawn_time.timestamp()
@@ -101,11 +114,24 @@ class AccountMonitor:
         return False
 
     def run(self):
-        """事件驱动的主监控循环，在 daemon 线程中运行。"""
+        """
+        核心监控主循环，运行于独立线程。
+        """
         is_logged_in = False
         monitor_started = False
 
-        # -- 启动 watchdog 监听 configs 文件 --
+        # 初始化时检查进程存活状态，防止监控晚于进程启动而漏判
+        try:
+            self._process_alive = any(
+                p.info['name'] == self.config.client
+                for p in psutil.process_iter(['name'])
+            )
+        except Exception:
+            self._process_alive = True
+        if not self._process_alive:
+            self._wake_event.set()
+
+        # 启动文件系统监听
         configs_dir = self.configs_file.parent
         if configs_dir.exists():
             handler = _ConfigsFileHandler(self.configs_file, self._wake_event, self._login_detected)
@@ -113,26 +139,29 @@ class AccountMonitor:
             self._observer.schedule(handler, str(configs_dir))
             self._observer.start()
 
-        # -- 订阅进程状态变化 --
+        # 订阅进程状态变化事件
         def on_process_status(payload: ProcessStatusChanged):
+            """on_process_status 方法。"""
             self._process_alive = payload.is_alive
             self._wake_event.set()
 
         get_event_bus().subscribe(PROCESS_STATUS_CHANGED, on_process_status)
 
+        self.logger.debug(f"监控已启动：{self.tag or self.config.default}")
         try:
             while True:
+                # 等待监控事件唤醒或轮询超时
                 self._wake_event.wait(timeout=self._MTIME_CHECK_INTERVAL)
                 self._wake_event.clear()
 
                 if self._process_alive:
                     if not is_logged_in:
+                        # 轮询二次确认登录
                         if not self._login_detected[0]:
-                            # watchdog 没触发，用 mtime 兜底
                             self._login_detected[0] = self._check_mtime()
 
                         if self._login_detected[0]:
-                            self.logger.info("账户登录成功")
+                            self.logger.info("检测到登录成功")
                             is_logged_in = True
                             self.config.start_time = datetime.now()
                             monitor_started = True
@@ -141,29 +170,33 @@ class AccountMonitor:
                                 AccountLoginDetected(tag=self.tag or self.config.default),
                             ))
                 else:
-                    # 进程已关闭，清理并恢复默认账户
-                    if self.tag and self.tag != self.config.default:
-                        self.logger.info("正在恢复默认账户")
+                    # 进程退出后的清理与现场恢复
+                    if not is_logged_in:
+                        self.logger.error("检测到 Telegram 在登录成功前意外关闭")
 
+                    # 若是非默认账户，需在退出后恢复默认环境
+                    if self.tag and self.tag != self.config.default:
                         if monitor_started:
                             running_time = datetime.now() - self.config.start_time
-
-                            # 使用超过 60 秒且已登录，认为本次使用有效，同步密钥
+                            # 仅对运行足够久（>60s）的会话进行变更备份，避免高频切换下的琐碎磁盘IO
                             if running_time.total_seconds() >= 60 and is_logged_in:
-                                self.logger.info(f"符合同步条件，更新密钥 -> '{self.tag}'")
+                                self.logger.info(f"正在备份账户密钥：{self.tag}")
                                 self.config.backup_account_keys(self.tag, Path(self.config.path) / "tdata")
 
-                        restore_default()
+                        self.logger.debug(f"正在恢复默认账户状态...")
+                        restore_default(config=self.config, logger=self.logger)
                     break
         except Exception as e:
-            self.logger.exception("状态监控线程异常", e)
+            self.logger.exception("监控线程发生未捕获异常", e)
         finally:
+            self.logger.debug("监控流程结束，正在清理资源...")
             get_event_bus().unsubscribe(PROCESS_STATUS_CHANGED, on_process_status)
             if self._observer:
                 self._observer.stop()
                 self._observer.join(timeout=2)
             self.config.sync_all_account_paths()
+            # 广播会话生命周期结束事件
             get_event_bus().publish(Event(
                 APP_COMPLETION,
-                AppCompletionEvent(success=True, message="账户切换完成"),
+                AppCompletionEvent(success=True, message="会话已正常结束"),
             ))

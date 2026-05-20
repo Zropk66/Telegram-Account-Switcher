@@ -1,49 +1,59 @@
+"""
+日志模块。
+
+基于 loguru 封装。
+"""
 import sys
 import threading
 from contextlib import suppress
-from typing import Callable, Optional, Protocol
+from typing import Any, Callable, Optional, Protocol
 
-from loguru import logger
+from loguru import logger as loguru_logger
+from src.core.interfaces import ILogger
 
-# 弹窗处理器：接收 (message, title, icon_type)
 PopupHandler = Callable[[str, str, str], None]
 
-# 用字典包装，确保闭包总能拿到最新的 handler
 _popup_state: dict = {"handler": None}
+_exception_level_registered = False
 
 
 class ConfigProvider(Protocol):
-    """配置提供者接口，用于依赖注入。"""
+    """配置读取契约，用于日志模块在初始化时判断是否需要输出到文件。"""
 
-    def get(self, key: str, default: any = None) -> any:
-        """读取配置项。"""
-        ...
+    def get(self, key: str, default: Any = None) -> Any: ...
 
 
-class DefaultConfigProvider:
-    """没有外部提供者时的兜底实现，始终返回默认值。"""
+class DefaultConfigProvider(ConfigProvider):
+    """默认兜底配置，不输出文件。"""
 
-    def get(self, key: str, default: any = None) -> any:
+    def get(self, key: str, default: Any = None) -> Any:
         return default
 
 
-# 全局配置提供者，默认使用兜底实现
 _config_provider: ConfigProvider = DefaultConfigProvider()
 
 
 def set_config_provider(provider: ConfigProvider) -> None:
-    """替换全局配置提供者，需实现 ``get(key, default)`` 方法。"""
+    """注入真实的配置提供者。"""
     global _config_provider
     _config_provider = provider
 
 
 def set_popup_handler(handler: Optional[PopupHandler]) -> None:
-    """设置弹窗处理器，签名为 ``(message, title, icon_type) -> None``，传入 ``None`` 可移除。"""
+    """注入 UI 层的弹窗逻辑。"""
     _popup_state["handler"] = handler
 
 
-def setup_popup_handler():
-    """把 loguru 的 popup 级别日志桥接到注入的弹窗处理器。"""
+def reset_logger_state() -> None:
+    """恢复日志模块的全局注入状态，供测试隔离使用。"""
+    global _config_provider
+    Logger.reset_instance()
+    _popup_state["handler"] = None
+    _config_provider = DefaultConfigProvider()
+
+
+def _setup_popup_bridge():
+    """将 loguru 的日志流通过 Sink 桥接到 UI 弹窗。"""
 
     def popup_sink(message):
         extra = message.record.get("extra", {})
@@ -51,9 +61,10 @@ def setup_popup_handler():
             return
 
         handler = _popup_state.get("handler")
-        if handler is None:
+        if not handler:
             return
 
+        level_name = message.record["level"].name
         level_map = {
             "DEBUG": "info",
             "INFO": "info",
@@ -63,24 +74,23 @@ def setup_popup_handler():
             "EXCEPTION": "error",
         }
 
-        icon_type = level_map.get(message.record["level"].name, "info")
+        icon_type = level_map.get(level_name, "info")
         full_message = message.record["message"]
 
         if exception := message.record.get("exception", None):
             full_message += f"\n\n{exception}"
 
-        handler(full_message, message.record["level"].name, icon_type)
+        handler(full_message, level_name, icon_type)
 
-    logger.add(popup_sink, filter=lambda record: record["extra"].get("popup", False))
+    loguru_logger.add(popup_sink, filter=lambda r: r["extra"].get("popup", False))
 
 
-class Logger:
-    """基于 loguru 的单例日志器，支持文件输出和弹窗通知。"""
-
+class Logger(ILogger):
+    """日志管理器。"""
     _instance = None
     _lock = threading.Lock()
 
-    def __new__(cls):
+    def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
@@ -88,23 +98,36 @@ class Logger:
                     cls._instance._init_logger()
         return cls._instance
 
+    @classmethod
+    def get_instance(cls) -> "Logger":
+        return cls()
+
+    @classmethod
+    def reset_instance(cls) -> None:
+        """释放当前日志单例和 loguru sink，供测试隔离使用。"""
+        loguru_logger.remove()
+        cls._instance = None
+
     @staticmethod
     def _init_logger():
-        """配置 loguru：移除默认 sink，添加控制台和可选的文件输出。"""
-        logger.remove()
+        global _exception_level_registered
+        loguru_logger.remove()
 
-        logger.level("EXCEPTION", no=45, color="<red>", icon="❌")
+        if not _exception_level_registered:
+            with suppress(ValueError):
+                loguru_logger.level("EXCEPTION", no=45, color="<red>", icon="❌")
+                _exception_level_registered = True
 
         log_format = (
             "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
             "<level>{level: <8}</level> | "
             "<level>{message}</level>"
         )
-        with suppress(TypeError):
-            logger.add(sys.stderr, format=log_format, level="DEBUG", colorize=True)
+
+        loguru_logger.add(sys.stderr, format=log_format, level="DEBUG", colorize=True)
 
         if _config_provider.get("log_output", False):
-            logger.add(
+            loguru_logger.add(
                 "TAS.log",
                 rotation="10 MB",
                 encoding="utf-8",
@@ -112,15 +135,12 @@ class Logger:
                 level="DEBUG",
             )
 
-        setup_popup_handler()
+        _setup_popup_bridge()
 
     @staticmethod
-    def log(level, message, popup=False, **kwargs):
-        """写入一条日志，``popup=True`` 时同时弹窗。"""
+    def log(level: str, message: str, popup: bool = False, **kwargs) -> None:
         exc = kwargs.pop("exc", None)
-        logger.opt(exception=exc, depth=1).bind(popup=popup, **kwargs).log(
-            level, message
-        )
+        loguru_logger.opt(exception=exc, depth=2).bind(popup=popup, **kwargs).log(level, message)
 
     def debug(self, message, popup=False, **kwargs):
         self.log("DEBUG", message, popup, **kwargs)

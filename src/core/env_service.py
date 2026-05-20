@@ -1,5 +1,9 @@
+"""
+Telegram 环境探测服务。
+
+负责探测 Telegram 客户端的安装位置，以及扫描本地目录以识别合法的账户文件夹。
+"""
 import base64
-import os
 import winreg
 from contextlib import suppress
 from pathlib import Path
@@ -7,142 +11,79 @@ from typing import Dict, Any, Tuple
 
 from src.core.crypto_service import AccountDataCryptoService
 from src.core.exceptions import TASException
-from src.core.logger import Logger
-from src.core.utils import search_file_in_dirs
+from src.core.interfaces import IEnvService
 
 
-class TelegramEnvService:
-    """探测 Telegram 安装路径和账户信息。"""
+class TelegramEnvService(IEnvService):
+    """负责 OS 级环境配置读取与账户目录扫描的服务类。"""
 
     @staticmethod
     def search_client() -> Tuple[str, str]:
-        """从注册表的 ``tg://`` 协议关联中提取客户端路径，返回 (可执行文件名, 所在目录)。"""
+        """通过查询注册表 tg:// 协议关联获取 Telegram 客户端的安装路径。 """
         try:
-            protocol_key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, r"tg", 0, winreg.KEY_READ)
-            with winreg.OpenKey(protocol_key, r"shell\open\command") as command_key:
-                command = winreg.QueryValue(command_key, None)
-                full_path = Path(TelegramEnvService.extract_executable_path(command)).resolve(strict=True)
-                if not full_path or not os.path.exists(full_path):
-                    raise TASException('提取的客户端路径无效或文件不存在.')
+            key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, r"tg\shell\open\command")
+            command = winreg.QueryValue(key, None)
 
-                client = os.path.basename(full_path)
-                path = os.path.dirname(full_path)
-                return client, path
-        except (FileNotFoundError, AttributeError) as e:
-            raise TASException('无法找到客户端，请确保协议关联已安装并注册') from e
-        except RuntimeError as e:
-            raise TASException(f'注册表操作失败') from e
-        except PermissionError as e:
-            raise TASException('如果权限不足，请以管理员身份运行该程序') from e
-        except OSError as e:
-            raise TASException(f'系统错误({e.winerror}): {e.strerror}') from e
+            exe_path = Path(TelegramEnvService._extract_path(command)).resolve(strict=True)
+            if not exe_path.is_file():
+                raise TASException("客户端可执行文件不存在。")
+
+            return exe_path.name, str(exe_path.parent)
+        except (FileNotFoundError, OSError, AttributeError) as e:
+            raise TASException("无法定位 Telegram 客户端，请确保程序已正确安装。") from e
 
     @staticmethod
-    def extract_executable_path(command: str) -> str:
-        """从注册表的 shell command 字符串中提取可执行文件路径。"""
+    def _extract_path(command: str) -> str:
+        """从注册表命令行字符串中提取可执行路径。"""
         if not command:
-            raise AttributeError("命令字符串为空")
+            raise AttributeError("命令为空")
 
-        try:
-            if command.startswith('"'):
-                end_quote = command.find('"', 1)
-                if end_quote != -1:
-                    return command[1:end_quote]
+        if command.startswith('"'):
+            end_quote = command.find('"', 1)
+            if end_quote != -1:
+                return command[1:end_quote]
 
-            parts = command.split()
-            if parts:
-                candidate = parts[0]
-                if os.path.exists(candidate):
-                    return candidate
-
-                clean_candidate = candidate.strip("\"'")
-                if os.path.exists(clean_candidate):
-                    return clean_candidate
-                return candidate
-            return command
-        except AttributeError:
-            raise
+        return command.split()[0].strip('"\'')
 
     @staticmethod
     def scan_accounts(base_path: str, passcode: str = None) -> Dict[str, Dict[str, Any]]:
-        """
-        扫描指定目录下所有 Telegram 账户。
+        """扫描目录下的所有有效账户文件夹。"""
+        results = {}
+        base = Path(base_path)
+        if not base.is_dir():
+            return results
 
-        通过 ``key_datas``、``settingss``、``D877F783D5D3EF8Cs`` 等特征文件
-        识别账户文件夹，并尝试解密获取 user_id。
-        """
-        result: Dict[str, Dict[str, Any]] = {}
-        try:
-            base = Path(base_path)
-            if not base.is_dir():
-                return result
+        feature_files = ['key_datas', 'settingss', 'D877F783D5D3EF8Cs']
 
-            suspected_folders = []
-            for entry in base.iterdir():
-                if not entry.is_dir():
-                    continue
+        for entry in base.iterdir():
+            if not entry.is_dir():
+                continue
 
-                if (entry / 'key_datas').exists() or \
-                        (entry / 'settingss').exists() or \
-                        (entry / 'D877F783D5D3EF8Cs').exists() or \
-                        (entry / 'D877F783D5D3EF8C' / 'maps').exists():
-                    suspected_folders.append(entry)
+            if any((entry / f).exists() for f in feature_files) or (entry / 'D877F783D5D3EF8C' / 'maps').exists():
+                folder_name = entry.name
 
-            for folder in suspected_folders:
-                folder_name = folder.name
-                user_id = AccountDataCryptoService.decrypt_account_id(folder, passcode) or ""
+                user_id = AccountDataCryptoService.decrypt_account_id(entry, passcode) or ""
 
-                tag_name = folder_name
-                tas_tag_file = folder / "tas_tag"
-                if tas_tag_file.is_file():
-                    with suppress(Exception):
-                        content = tas_tag_file.read_text(encoding="utf-8").strip()
-                        if content:
-                            tag_name = content
+                tag_file = entry / "tas_tag"
+                tag_name = tag_file.read_text(encoding="utf-8").strip() if tag_file.is_file() else folder_name
 
                 account_data = {
                     'id': user_id,
                     'tag': tag_name,
                     'folder': folder_name,
-                    'info': '',
-                    'identity': '',
-                    'key': ''
+                    'info': '', 'identity': '', 'key': ''
                 }
 
-                # 密钥数据 Base64 编码，用于快速备份/恢复（非深度解密）
-                info_path = folder / 'D877F783D5D3EF8C' / 'maps'
-                identity_path = folder / 'D877F783D5D3EF8Cs'
-                key_path = folder / 'key_datas'
-
-                if info_path.exists():
+                def _b64_save(path: Path) -> str:
+                    """内部方法：_b64_save。"""
                     with suppress(Exception):
-                        account_data['info'] = base64.b64encode(info_path.read_bytes()).decode()
-                if identity_path.exists():
-                    with suppress(Exception):
-                        account_data['identity'] = base64.b64encode(identity_path.read_bytes()).decode()
-                if key_path.exists():
-                    with suppress(Exception):
-                        account_data['key'] = base64.b64encode(key_path.read_bytes()).decode()
+                        return base64.b64encode(path.read_bytes()).decode()
+                    return ""
 
-                result[folder_name] = account_data
+                account_data['info'] = _b64_save(entry / 'D877F783D5D3EF8C' / 'maps')
+                account_data['identity'] = _b64_save(entry / 'D877F783D5D3EF8Cs')
+                account_data['key'] = _b64_save(entry / 'key_datas')
 
-        except Exception:
-            with suppress(Exception):
-                Logger().error("扫描账户过程中发生严重异常")
+                results[folder_name] = account_data
 
-        return result
-
-    @staticmethod
-    def sync_account_folders(base_path: str, tags: Dict[str, Dict[str, Any]]) -> Tuple[Dict[str, Dict[str, Any]], bool]:
-        """把配置中的账户文件夹路径和磁盘实际情况对齐，返回 (更新后的 tags, 是否有变化)。"""
-        if not base_path or not os.path.isdir(base_path):
-            return tags, False
-
-        updated_tags = tags.copy()
-        changed = False
-        for tag, info in updated_tags.items():
-            real_folder = search_file_in_dirs(base_path, tag)
-            if real_folder and info.get("folder") != real_folder:
-                info["folder"] = real_folder
-                changed = True
-        return updated_tags, changed
+        return results

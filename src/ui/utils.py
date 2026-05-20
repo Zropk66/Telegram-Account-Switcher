@@ -1,39 +1,38 @@
+"""
+UI 工具类集合，包含界面编辑委托、事件过滤、账户辅助与工厂类。
+"""
+
 from pathlib import Path
 from typing import Set, Optional
 
 from PySide6.QtCore import QRegularExpression, Qt, QObject, QEvent
-from PySide6.QtGui import QRegularExpressionValidator, QValidator
+from PySide6.QtGui import QRegularExpressionValidator
 from PySide6.QtWidgets import QStyledItemDelegate, QLineEdit, QListWidget
 
 
 class NonEmptyDelegate(QStyledItemDelegate):
-    """列表项编辑委托，不允许输入纯空白。"""
+    """防止在列表编辑中输入空白字符串的委托类。"""
 
     def createEditor(self, parent, option, index):
+        """应用正则约束，要求非空字符输入。"""
         editor = QLineEdit(parent)
-        regex = QRegularExpression(r"^[^\s](.*[^\s])?$")
+        regex = QRegularExpression(r"^[^\\s](.*[^\\s])?$")
         validator = QRegularExpressionValidator(regex, editor)
         editor.setValidator(validator)
         return editor
 
 
-class NonEmptyValidator(QValidator):
-    """简单的非空验证器，空白字符会被忽略。"""
-
-    def validate(self, input_str, pos):
-        input_str = input_str.replace(' ', '')
-        return QValidator.Acceptable, input_str, pos
-
-
 class DoubleClickFilter(QObject):
-    """双击事件过滤器，安装到输入框上可以响应双击打开选择器。"""
+    """用于在控件上捕获双击事件并执行回调的过滤器。"""
 
     def __init__(self, callback, target_widget=None):
+        """初始化。"""
         super().__init__()
         self.callback = callback
         self.target_widget = target_widget
 
     def eventFilter(self, obj, event):
+        """截获鼠标双击，确保在特定目标上触发回调。"""
         if event.type() == QEvent.MouseButtonDblClick:
             if event.button() == Qt.LeftButton:
                 if self.target_widget is None or obj is self.target_widget:
@@ -43,10 +42,11 @@ class DoubleClickFilter(QObject):
 
 
 class AccountScannerHelper:
-    """账户扫描时用到的一些静态工具方法。"""
+    """账户导入扫描辅助类，负责路径合法性检查及标记文件处理。"""
 
     @staticmethod
     def validate_path(base_path: str) -> bool:
+        """检查路径是否存在并提示。"""
         if not base_path or not Path(base_path).exists():
             from src.ui.popup import alert
             alert("请输入有效的 Telegram 客户端路径", "警告", "warning")
@@ -55,7 +55,7 @@ class AccountScannerHelper:
 
     @staticmethod
     def get_existing_folders(list_widget: QListWidget) -> Set[str]:
-        """收集列表中已有账户的文件夹名，扫描时用来去重。"""
+        """从当前 UI 列表中提取已添加的账户文件夹集合，用于扫描去重。"""
         existing_folders = set()
         for i in range(list_widget.count()):
             item = list_widget.item(i)
@@ -66,7 +66,7 @@ class AccountScannerHelper:
 
     @staticmethod
     def write_tag_file(base_path: str, folder_name: str, tag_name: str) -> bool:
-        """在账户文件夹下写入 tas_tag 文件，标记该账户的标签。"""
+        """在账户目录下写入 `tas_tag` 文件以关联标识。"""
         try:
             tag_file = Path(base_path) / folder_name / "tas_tag"
             tag_file.write_text(tag_name, encoding="utf-8")
@@ -76,14 +76,16 @@ class AccountScannerHelper:
 
 
 class AsyncTaskRunner:
-    """把耗时操作丢到 QThreadPool 里跑，完成后通过回调通知 UI。"""
+    """提供将同步任务卸载至后台线程池的调度接口。"""
 
     @staticmethod
     def run_search_client(thread_pool, finished_callback, error_callback):
+        """异步执行环境搜索任务，并通过信号回调。"""
         from src.ui.settings_services import TaskRunner
         from src.core.env_service import TelegramEnvService
 
         def task():
+            """task 方法。"""
             return TelegramEnvService.search_client()
 
         runner = TaskRunner(task)
@@ -93,7 +95,7 @@ class AsyncTaskRunner:
 
 
 class DialogFactory:
-    """集中创建各种对话框，避免在 UI 代码里到处 import。"""
+    """集中创建常用弹窗对话框的工厂类。"""
 
     @staticmethod
     def create_edit_label_dialog(
@@ -105,6 +107,7 @@ class DialogFactory:
         key: str = "",
         parent=None
     ):
+        """构造账户信息编辑框。"""
         from src.ui.dialogs import EditLabelDialog
         return EditLabelDialog(user_id, folder, tag, info, identity, key, parent)
 
@@ -115,17 +118,20 @@ class DialogFactory:
         key: str = "",
         parent=None
     ):
+        """构造加密密钥显示框。"""
         from src.ui.dialogs import ShowKeyDialog
         return ShowKeyDialog(info, identity, key, parent)
 
     @staticmethod
     def browse_folder(parent=None, caption: str = "选择文件夹") -> Optional[str]:
+        """调用文件系统浏览目录。"""
         from PySide6.QtWidgets import QFileDialog
         folder = QFileDialog.getExistingDirectory(parent, caption)
         return folder if folder else None
 
     @staticmethod
     def browse_file(parent=None, caption: str = "选择文件", filter: str = "所有文件 (*.*)") -> Optional[str]:
+        """调用文件系统浏览特定文件。"""
         from PySide6.QtWidgets import QFileDialog
         file_path, _ = QFileDialog.getOpenFileName(parent, caption, "", filter)
         return file_path if file_path else None

@@ -1,9 +1,9 @@
-"""TDF 文件读取与解密入口模块。
-
-负责从磁盘读取 Telegram 的 TDF 格式文件，
-解析其中的加密数据并用本地密钥进行解密。
 """
+TDF 文件处理模块。
 
+负责从磁盘读取 Telegram 的 TDF (Telegram Data File) 格式文件，
+并解析其中的加密载荷。
+"""
 from io import BytesIO
 from typing import Tuple
 
@@ -13,17 +13,21 @@ from src.core.telegram_data_decrypter.tdf import RawTdfFile, parse_raw_tdf
 
 
 def read_tdf_file(filepath: str) -> RawTdfFile:
-    """读取 filepath 自动补 's' 后缀的 TDF 文件并解析为 RawTdfFile 对象。"""
+    """
+    读取并解析原始 TDF 文件。
+
+    注：TDF 路径在程序中通常不带 's'，但磁盘文件名带有 's' 后缀，此处自动补全。
+    """
     real_path = filepath + 's'
-    try:
-        with open(real_path, 'rb') as f:
-            return parse_raw_tdf(f.read())
-    except FileNotFoundError as e:
-        raise FileNotFoundError(real_path) from e
+    with open(real_path, 'rb') as f:
+        return parse_raw_tdf(f.read())
 
 
 def read_encrypted_file(filepath: str, local_key: bytes) -> Tuple[int, bytes]:
-    """读取 TDF 文件并用 local_key 解密其中的数据，返回 (version, decrypted_data) 元组。"""
+    """
+    读取指定 TDF 文件，执行 Qt 字节流解析并使用 local_key 进行解密。
+    """
     tdf_file = read_tdf_file(filepath)
+    # Telegram 将数据序列化为 Qt 字节数组格式
     encrypted_data = read_qt_byte_array(BytesIO(tdf_file.encrypted_data))
     return tdf_file.version, decrypt_local(encrypted_data, local_key)

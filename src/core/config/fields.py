@@ -1,25 +1,31 @@
 """
-配置字段描述符
+配置描述符定义。
 
-用 Python descriptor 协议实现带类型检查和缓存的自定义属性。
-赋值时自动触发持久化，读取时走缓存避免重复解析。
+通过 Python 的描述符协议实现透明的配置读写
 """
 import weakref
-from typing import Any, Optional, Type
+from typing import Any, Optional, Type, TYPE_CHECKING, TypeVar, Generic
+
+if TYPE_CHECKING:
+    from src.core.config.service import ConfigService
+
+T = TypeVar('T')
 
 
-class ConfigField:
-    """描述符：在 ConfigService 上定义一个带类型约束的配置字段"""
+class ConfigField(Generic[T]):
+    """配置属性描述符。"""
 
     __slots__ = ("name", "expected_type", "default_value", "_cache")
 
-    def __init__(self, name: str, expected_type: type, default_value: Any = None):
+    def __init__(self, name: str, expected_type: Type[T], default_value: Optional[T] = None):
+        """初始化。"""
         self.name = name
         self.expected_type = expected_type
         self.default_value = default_value
         self._cache = weakref.WeakKeyDictionary()
 
-    def __get__(self, instance: Optional["ConfigService"], owner: Type["ConfigService"]) -> Any:
+    def __get__(self, instance: Optional["ConfigService"], owner: Type["ConfigService"]) -> Optional[T]:
+        """获取字段值。"""
         if instance is None:
             return self
 
@@ -29,11 +35,9 @@ class ConfigField:
         config = getattr(instance, "_config", {})
         value = config.get(self.name)
 
-        # 没有就用默认值
         if value is None:
             value = self.default_value
 
-        # 类型不对就尝试强转，转不了还是用默认值
         if value is not None and not isinstance(value, self.expected_type):
             try:
                 value = self.expected_type(value)
@@ -44,23 +48,27 @@ class ConfigField:
         return value
 
     def __set__(self, instance: "ConfigService", value: Any) -> None:
+        """更新字段值并持久化。"""
         if value is not None and not isinstance(value, self.expected_type):
             raise TypeError(
-                f"{self.name} expected {self.expected_type.__name__}, got {type(value).__name__}"
+                f"字段 '{self.name}' 类型错误：期望 {self.expected_type.__name__}, 实际为 {type(value).__name__}"
             )
 
         self._cache[instance] = value
 
-        # 写入配置字典并触发持久化
+        # noinspection PyProtectedMember
         with instance._lock:
             config = getattr(instance, "_config")
             config[self.name] = value
 
+            # noinspection PyProtectedMember
             instance._storage._config_changed = True
+            # noinspection PyProtectedMember
             if not instance._storage._batch:
+                # noinspection PyProtectedMember
                 instance._storage.save(config)
 
     def clear_cache(self, instance: Any) -> None:
-        """清除指定实例的缓存，下次读取会重新从 _config 取值"""
+        """强制清理缓存，使下次读取直接命中内部字典。"""
         if instance in self._cache:
             del self._cache[instance]

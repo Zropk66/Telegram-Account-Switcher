@@ -1,23 +1,30 @@
+"""
+Telegram 账户数据解密桥接服务。
+
+封装底层 `telegram_data_decrypter` 模块，为高层业务逻辑提供简洁的解密接口。
+"""
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
+from src.core.interfaces import ICryptoService
 
-class AccountDataCryptoService:
-    """封装 Telegram tdata 的解密能力，供外部模块调用。"""
+
+class AccountDataCryptoService(ICryptoService):
+    """负责账户数据解密任务的服务类。"""
 
     @staticmethod
     def decrypt_accounts(tdata_path: Path, passcode: Optional[str] = None) -> List[Dict[str, Any]]:
-        """解密指定 tdata 目录，返回所有账户信息。"""
+        """解密指定 tdata 目录并提取所有账户信息。"""
         try:
-            import src.core.telegram_data_decrypter.main as tdd
+            from src.core.telegram_data_decrypter import main as tdd
             return tdd.decrypt_accounts(str(tdata_path), passcode)
-        except Exception:
+        except (ImportError, RuntimeError, ValueError):
             return []
 
     @staticmethod
     def decrypt_account_id(tdata_path: Path, passcode: Optional[str] = None) -> Optional[str]:
-        """只取 tdata 下第一个账户的 user_id。"""
+        """提取首个账户的 User ID。"""
         accounts = AccountDataCryptoService.decrypt_accounts(tdata_path, passcode)
-        if accounts and accounts[0].get('user_id'):
-            return str(accounts[0].get('user_id'))
+        if accounts and "user_id" in accounts[0]:
+            return str(accounts[0]["user_id"])
         return None

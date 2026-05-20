@@ -1,5 +1,9 @@
+"""
+Telegram 账户切换器主入口。
+
+负责初始化全局依赖、处理命令行入口、启动进程监控，并驱动一次账户切换流程。
+"""
 import asyncio
-import atexit
 import signal
 import sys
 import threading
@@ -8,7 +12,6 @@ from pathlib import Path
 
 from src.core import (
     AccountSwitcher,
-    ProcessManager,
     ProcessMonitor,
     recovery,
     Logger,
@@ -25,19 +28,20 @@ from src.core.event_bus import (
     APP_COMPLETION,
 )
 from src.core.logger import set_popup_handler, set_config_provider
+from src.core.single_instance import SingleInstanceLock, SingleInstanceException
 from src.ui.adapters import create_cli_callbacks, create_popup_handler
 from src.ui.popup import Popup
 from src.ui.settings_ui import open_settings_window
 
-# -- 全局状态 --
 logger: Logger
 CONFIG: ConfigService
+
 TITLE = "TAS"
 VERSION = "2.0.0"
 
 
 def setup_dependency_injection():
-    """把配置提供者和日志处理器注入到各模块，建立依赖关系。"""
+    """把配置和日志回调注入到仍需全局访问的服务中。"""
     global logger
 
     config_provider = ConfigData.as_provider()
@@ -57,7 +61,7 @@ def setup_dependency_injection():
 
 
 def create_logger_with_popup() -> Logger:
-    """创建 Logger 实例，并挂载弹窗处理器。"""
+    """创建日志器。"""
     new_logger = Logger()
     popup_handler = create_popup_handler()
     set_popup_handler(popup_handler)
@@ -65,7 +69,7 @@ def create_logger_with_popup() -> Logger:
 
 
 def create_cli_controller(version: str) -> CLIController:
-    """构建 CLIController，注入所有 UI 回调。"""
+    """构建命令行控制器。"""
     callbacks = create_cli_callbacks()
     return CLIController(
         version=version,
@@ -78,7 +82,7 @@ def create_cli_controller(version: str) -> CLIController:
 
 
 class TASApp:
-    """管理应用的整体生命周期：初始化 → 切换账户 → 监控 → 退出清理。"""
+    """管理一次应用运行周期，从参数解析到切换完成事件。"""
 
     def __init__(self, version: str):
         from PySide6.QtWidgets import QApplication
@@ -91,18 +95,21 @@ class TASApp:
         self.cli_controller = create_cli_controller(version)
 
     def __enter__(self):
+        """注册退出保护，确保异常和中断都会走统一清理路径。"""
         global _cleanup_done
-        _cleanup_done = False
+        _cleanup_done.clear()
         register_signal_handlers()
         sys.excepthook = handle_global_exception
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        """退出时等待监控线程结束，并释放单实例锁。"""
         self._join_monitor_thread(timeout=5)
+        SingleInstanceLock.cleanup()
         log_and_exit(mark=True)
 
     async def _watcher_task(self):
-        """在后台持续监控进程状态，直到收到任务完成事件。"""
+        """后台监控 Telegram 进程，直到收到应用完成事件。"""
         await self.monitor.start_watching()
         completion_event = asyncio.Event()
 
@@ -117,9 +124,9 @@ class TASApp:
         await self.monitor.stop_watching()
 
     def start_monitoring(self):
-        """在新线程中启动进程监控。"""
+        """在独立守护线程中启动进程监控事件循环。"""
         self.loop = asyncio.new_event_loop()
-        self.monitor = ProcessMonitor(CONFIG.client)
+        self.monitor = ProcessMonitor(CONFIG.client, logger=logger)
         self._monitor_thread = threading.Thread(
             target=run_async_in_thread,
             args=(self.loop, self._watcher_task()),
@@ -129,7 +136,7 @@ class TASApp:
         self._monitor_thread.start()
 
     def _join_monitor_thread(self, timeout: float = 5):
-        """等监控线程结束，超时就强行关闭事件循环。"""
+        """等待监控线程退出，超时后停止其事件循环。"""
         if self._monitor_thread is not None and self._monitor_thread.is_alive():
             self._monitor_thread.join(timeout=timeout)
             if self._monitor_thread.is_alive() and self.loop is not None and not self.loop.is_closed():
@@ -140,11 +147,15 @@ class TASApp:
         self.loop = None
 
     def run(self):
-        """应用主流程：解析参数 → 校验配置 → 切换账户 → 等待完成。"""
+        """执行 CLI 分支或账户切换主流程，并返回进程退出码。"""
         try:
             args = self.cli_controller.parse_args()
-        except Exception:
-            return 0
+        except (SystemExit, KeyboardInterrupt):
+            raise
+        except Exception as e:
+            if logger:
+                logger.error(f"参数解析失败: {e}")
+            return 1
 
         config_file = Path(CONFIG.config_file)
         if not config_file.exists() or not self.cli_controller.check_config(args):
@@ -154,27 +165,26 @@ class TASApp:
         if self.cli_controller.handle_actions(args):
             return 0
 
-        logger.info("初始化成功")
-
+        logger.info(f"切换账户: {CONFIG.tag or CONFIG.default}")
+        logger.debug(f"Telegram路径: {CONFIG.path}")
         self.start_monitoring()
-
-        ProcessManager.kill_process(CONFIG.client)
 
         def wrapped_confirm(msg):
             with Popup.context():
                 return Popup.confirm(msg, "账户切换确认")
 
-        switched = AccountSwitcher().process(confirm_callback=wrapped_confirm)
-
+        switched = AccountSwitcher(config=CONFIG, logger=logger).process(confirm_callback=wrapped_confirm)
         if not switched:
+            logger.error("账户切换失败")
             return 1
 
+        logger.debug("账户切换成功，等待完成")
         self._wait_for_completion()
         return 0
 
     @staticmethod
     def _wait_for_completion():
-        """阻塞等待 AppCompletionEvent，替代旧的轮询方式。"""
+        """等待账户切换监控发布完成事件。"""
         completion_event = threading.Event()
 
         def on_completion(payload: AppCompletionEvent):
@@ -187,28 +197,26 @@ class TASApp:
             get_event_bus().unsubscribe(APP_COMPLETION, on_completion)
 
 
-_cleanup_done = False
+_cleanup_done = threading.Event()
 
 
 def log_and_exit(mark=False):
-    """退出前的清理工作：恢复默认账户、记录运行时长。"""
-    global _cleanup_done
-    if mark and _cleanup_done:
+    """退出前执行一次性清理，避免重复恢复默认账户。"""
+    global _cleanup_done, CONFIG
+    if mark and _cleanup_done.is_set():
         return None
-    config = ConfigService()
     with suppress(Exception):
         if mark:
-            _cleanup_done = True
-            atexit.unregister(log_and_exit)
-            recovery()
+            _cleanup_done.set()
+            recovery(config=CONFIG, logger=logger)
 
-        if config.log_output and config.start_time and logger:
-            logger.info(f"运行时长：{config.watch_time()}")
+        if CONFIG and CONFIG.log_output and CONFIG.start_time and logger:
+            logger.info(f"运行时长：{CONFIG.watch_time()}")
     return None
 
 
 def register_signal_handlers():
-    """监听 Ctrl+C，优雅退出。"""
+    """把 Ctrl+C 接入统一清理流程。"""
 
     def handle_interrupt(signum, frame):
         log_and_exit(True)
@@ -218,7 +226,7 @@ def register_signal_handlers():
 
 
 def handle_global_exception(exc_type, exc_value, exc_traceback):
-    """兜底捕获未处理的异常，弹窗提示用户。"""
+    """记录未处理异常，并在可能时通过弹窗提示用户。"""
     if exc_type in (KeyboardInterrupt, SystemExit):
         sys.exit(0)
     if logger:
@@ -230,7 +238,7 @@ def handle_global_exception(exc_type, exc_value, exc_traceback):
 
 
 def run_async_in_thread(loop, coro) -> None:
-    """在独立线程中运行 asyncio 事件循环。"""
+    """在线程内运行 asyncio 循环，并在退出时取消残留任务。"""
     asyncio.set_event_loop(loop)
     try:
         loop.run_until_complete(coro)
@@ -246,13 +254,27 @@ def run_async_in_thread(loop, coro) -> None:
 
 
 def main():
-    """程序入口。"""
+    """应用程序入口。"""
+    try:
+        SingleInstanceLock.ensure_single_instance()
+    except SingleInstanceException as e:
+        with Popup.context():
+            Popup.alert(e.message, "客户端重复启动")
+        return 1
+
     global logger, CONFIG
 
     setup_dependency_injection()
-
     logger = create_logger_with_popup()
     CONFIG = ConfigService()
 
-    with TASApp(VERSION) as app:
-        return app.run()
+    logger.info(f"初始化成功")
+
+    try:
+        with TASApp(VERSION) as app:
+            return app.run()
+    except KeyboardInterrupt:
+        return 0
+    except Exception as e:
+        logger.exception("程序异常终止", e)
+        return 1

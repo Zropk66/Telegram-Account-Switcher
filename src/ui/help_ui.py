@@ -1,3 +1,9 @@
+"""
+命令行帮助窗口。
+
+以表格形式展示所有可用命令行参数。
+"""
+
 import sys
 
 from PySide6.QtCore import Slot
@@ -7,7 +13,7 @@ from src.ui.ui_help import Ui_help
 
 
 def open_help_window(version):
-    """入口函数：创建帮助窗口并进入事件循环。"""
+    """创建帮助窗口并进入 Qt 事件循环。"""
     app = QApplication.instance() or QApplication(sys.argv)
     widget = HelpWindow(version)
     widget.show()
@@ -15,13 +21,15 @@ def open_help_window(version):
 
 
 class HelpWindow(QWidget):
-    """帮助窗口，以表格形式展示所有命令行参数的用法。"""
+    """展示命令行参数说明的帮助窗口。"""
 
     def __init__(self, version):
+        """初始化。"""
         super().__init__()
         self.version = version
         self.ui = Ui_help()
         self.ui.setupUi(self)
+
         self.help_datas = [
             ("--version", "-v", "获取版本"),
             ("--help", "-h", "帮助文档"),
@@ -33,7 +41,9 @@ class HelpWindow(QWidget):
             ("--key-login", "-k", "强制使用key绕过目录锁定直接登录"),
             ("--tag", "-t", "指定操作特定标签账户")
         ]
+
         self.ui.version_label.setText(f'TAS v{self.version}')
+
         self.ui.args_widget.setRowCount(len(self.help_datas))
         for row, (long_opt, short_opt, desc) in enumerate(self.help_datas):
             self.ui.args_widget.setItem(row, 0, QTableWidgetItem(str(row + 1)))
@@ -43,15 +53,16 @@ class HelpWindow(QWidget):
 
         self.ui.args_widget.setSelectionMode(QAbstractItemView.SingleSelection)
 
-        # 列宽自适应，最后一列撑满剩余空间
         self.ui.args_widget.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.ui.args_widget.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.ui.args_widget.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.ui.args_widget.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+
         self.ui.args_widget.verticalHeader().setVisible(False)
         self.ui.args_widget.setAlternatingRowColors(True)
         self.ui.args_widget.setEditTriggers(QTableWidget.NoEditTriggers)
 
     @Slot()
     def double_click_event(self, event):
+        """调试表格双击事件。"""
         print(f'{event.row()} 行, {event.column()} 列被双击了. 数据 -> "{event.data()}".')

@@ -1,10 +1,9 @@
-"""Telegram 本地设置块的解析模块。
-
-定义了 Telegram 桌面端存储的各种设置项 ID（SettingsBlocks 枚举），
-以及根据块 ID 读取对应类型数据的解析逻辑。
-解密后的账户数据文件就是由一系列这样的设置块组成的。
 """
+Telegram 设置数据块解析。
 
+Telegram 桌面端将配置序列化为一系列“块”（Block）。每个块以一个 int32 的
+ID 开头，后跟对应的变长数据。
+"""
 from enum import Enum
 from io import BytesIO
 
@@ -12,158 +11,65 @@ from src.core.telegram_data_decrypter.qt import (
     read_qt_int32,
     read_qt_uint64,
     read_qt_byte_array,
-    read_qt_utf8
+    read_qt_utf8,
 )
 
 
 class SettingsBlocks(Enum):
-    """Telegram 本地设置块的类型 ID。
-
-    每个设置块在数据文件中由一个 int32 的块 ID 标识，
-    后面跟着该类型对应的数据。名称中的 'Old' 后缀表示该设置项
-    在新版 Telegram 中已废弃或迁移到其他存储方式。
-    """
+    """设置数据块 ID 定义。"""
     dbiKey = 0x00
     dbiUser = 0x01
-
-    dbiDcOptionOldOld = 0x02
-    dbiChatSizeMaxOld = 0x03
-    dbiMutePeerOld = 0x04
-    dbiSendKeyOld = 0x05
     dbiAutoStart = 0x06
     dbiStartMinimized = 0x07
-    dbiSoundFlashBounceNotifyOld = 0x08
-    dbiWorkModeOld = 0x09
     dbiSeenTrayTooltip = 0x0a
-    dbiDesktopNotifyOld = 0x0b
     dbiAutoUpdate = 0x0c
     dbiLastUpdateCheck = 0x0d
-    dbiWindowPositionOld = 0x0e
-    dbiConnectionTypeOldOld = 0x0f
-
     dbiDefaultAttach = 0x11
-    dbiCatsAndDogsOld = 0x12
-    dbiReplaceEmojiOld = 0x13
-    dbiAskDownloadPathOld = 0x14
-    dbiDownloadPathOldOld = 0x15
-    dbiScaleOld = 0x16
-    dbiEmojiTabOld = 0x17
-    dbiRecentEmojiOldOldOld = 0x18
-    dbiLoggedPhoneNumberOld = 0x19
-    dbiMutedPeersOld = 0x1a
-
-    dbiNotifyViewOld = 0x1c
     dbiSendToMenu = 0x1d
-    dbiCompressPastedImageOld = 0x1e
-    dbiLangOld = 0x1f
-    dbiLangFileOld = 0x20
-    dbiTileBackgroundOld = 0x21
-    dbiAutoLockOld = 0x22
     dbiDialogLastPath = 0x23
-    dbiRecentEmojiOldOld = 0x24
-    dbiEmojiVariantsOldOld = 0x25
     dbiRecentStickers = 0x26
-    dbiDcOptionOld = 0x27
-    dbiTryIPv6Old = 0x28
-    dbiSongVolumeOld = 0x29
-    dbiWindowsNotificationsOld = 0x30
-    dbiIncludeMutedOld = 0x31
-    dbiMegagroupSizeMaxOld = 0x32
-    dbiDownloadPathOld = 0x33
-    dbiAutoDownloadOld = 0x34
-    dbiSavedGifsLimitOld = 0x35
-    dbiShowingSavedGifsOld = 0x36
-    dbiAutoPlayOld = 0x37
-    dbiAdaptiveForWideOld = 0x38
-    dbiHiddenPinnedMessagesOld = 0x39
-    dbiRecentEmojiOld = 0x3a
-    dbiEmojiVariantsOld = 0x3b
-    dbiDialogsModeOld = 0x40
-    dbiModerateModeOld = 0x41
-    dbiVideoVolumeOld = 0x42
-    dbiStickersRecentLimitOld = 0x43
-    dbiNativeNotificationsOld = 0x44
-    dbiNotificationsCountOld = 0x45
-    dbiNotificationsCornerOld = 0x46
-    dbiThemeKeyOld = 0x47
-    dbiDialogsWidthRatioOld = 0x48
-    dbiUseExternalVideoPlayerOld = 0x49
-    dbiDcOptionsOld = 0x4a
     dbiMtpAuthorization = 0x4b
-    dbiLastSeenWarningSeenOld = 0x4c
     dbiSessionSettings = 0x4d
     dbiLangPackKey = 0x4e
-    dbiConnectionTypeOld = 0x4f
-    dbiStickersFavedLimitOld = 0x50
-    dbiSuggestStickersByEmojiOld = 0x51
-    dbiSuggestEmojiOld = 0x52
-    dbiTxtDomainStringOldOld = 0x53
     dbiThemeKey = 0x54
     dbiTileBackground = 0x55
-    dbiCacheSettingsOld = 0x56
     dbiPowerSaving = 0x57
-    dbiScalePercent = 0x58
-    dbiPlaybackSpeedOld = 0x59
     dbiLanguagesKey = 0x5a
-    dbiCallSettingsOld = 0x5b
     dbiCacheSettings = 0x5c
-    dbiTxtDomainStringOld = 0x5d
     dbiApplicationSettings = 0x5e
-    dbiDialogsFiltersOld = 0x5f
     dbiFallbackProductionConfig = 0x60
     dbiBackgroundKey = 0x61
-
-    dbiEncryptedWithSalt = 333
     dbiEncrypted = 444
-
     dbiVersion = 666
 
 
 def read_boolean(data: BytesIO) -> bool:
-    """读取一个布尔值，Qt 序列化中用 int32 的 0/1 表示。"""
+    """读取 Qt int32 0/1 布尔值。"""
     return read_qt_int32(data) == 1
 
 
-def read_settings_block(version, data: BytesIO, block_id: SettingsBlocks):
-    """根据 block_id 读取单个设置块的数据，返回对应的 Python 值，未知块 ID 抛出 ValueError。"""
-    if block_id == SettingsBlocks.dbiAutoStart:
+def read_settings_block(version: int, data: BytesIO, block_id: SettingsBlocks):
+    """
+    根据 Block ID 解析特定格式的块数据。
+    """
+    # 简单的基础类型块
+    if block_id in (SettingsBlocks.dbiAutoStart, SettingsBlocks.dbiStartMinimized,
+                    SettingsBlocks.dbiSendToMenu, SettingsBlocks.dbiSeenTrayTooltip,
+                    SettingsBlocks.dbiAutoUpdate):
         return read_boolean(data)
 
-    if block_id == SettingsBlocks.dbiStartMinimized:
-        return read_boolean(data)
-
-    # 音量值以百万分之一为单位存储，转换为 0.0~1.0 的浮点数
-    if block_id == SettingsBlocks.dbiSongVolumeOld:
-        return read_qt_int32(data) / 1e6
-
-    if block_id == SettingsBlocks.dbiSendToMenu:
-        return read_boolean(data)
-
-    if block_id == SettingsBlocks.dbiSeenTrayTooltip:
-        return read_boolean(data)
-
-    if block_id == SettingsBlocks.dbiAutoUpdate:
-        return read_boolean(data)
-
-    if block_id == SettingsBlocks.dbiLastUpdateCheck:
+    if block_id in (SettingsBlocks.dbiLastUpdateCheck, SettingsBlocks.dbiScalePercent,
+                    SettingsBlocks.dbiPowerSaving):
         return read_qt_int32(data)
 
-    if block_id == SettingsBlocks.dbiScalePercent:
-        return read_qt_int32(data)
-
-    if block_id == SettingsBlocks.dbiFallbackProductionConfig:
-        return read_qt_byte_array(data)
-
-    if block_id == SettingsBlocks.dbiApplicationSettings:
+    if block_id in (SettingsBlocks.dbiFallbackProductionConfig,
+                    SettingsBlocks.dbiApplicationSettings,
+                    SettingsBlocks.dbiMtpAuthorization):
         return read_qt_byte_array(data)
 
     if block_id == SettingsBlocks.dbiDialogLastPath:
         return read_qt_utf8(data)
 
-    if block_id == SettingsBlocks.dbiPowerSaving:
-        return read_qt_int32(data)
-
-    # 主题键包含日间/夜间两个 uint64 值和一个夜间模式标志
     if block_id == SettingsBlocks.dbiThemeKey:
         return {
             'day': read_qt_uint64(data),
@@ -171,40 +77,28 @@ def read_settings_block(version, data: BytesIO, block_id: SettingsBlocks):
             'night_mode': read_boolean(data)
         }
 
-    # 背景键包含日间/夜间两个 uint64 值
     if block_id == SettingsBlocks.dbiBackgroundKey:
         return {
             'day': read_qt_uint64(data),
             'night': read_qt_uint64(data)
         }
 
-    # 平铺背景包含日间/夜间两个 int32 标志
     if block_id == SettingsBlocks.dbiTileBackground:
-        return {
-            'day': read_qt_int32(data),
-            'night': read_qt_int32(data)
-        }
+        return {'day': read_qt_int32(data), 'night': read_qt_int32(data)}
 
     if block_id == SettingsBlocks.dbiLangPackKey:
         return read_qt_uint64(data)
 
-    # MTP 授权数据，原始字节串，后续由 main 模块进一步解析
-    if block_id == SettingsBlocks.dbiMtpAuthorization:
-        return read_qt_byte_array(data)
-
-    raise ValueError(f'Unknown block ID while reading settings: {block_id}')
+    raise ValueError(f'未知 Block ID: {block_id}')
 
 
-def read_settings_blocks(version, data: BytesIO):
-    """连续读取所有设置块直到数据流耗尽，返回以 SettingsBlocks 枚举值为键的字典。"""
+def read_settings_blocks(version: int, data: BytesIO) -> dict:
+    """循环读取直到数据流耗尽，将所有块汇聚为字典。"""
     blocks = {}
-
     try:
         while True:
             block_id = SettingsBlocks(read_qt_int32(data))
-            block_data = read_settings_block(version, data, block_id)
-            blocks[block_id] = block_data
+            blocks[block_id] = read_settings_block(version, data, block_id)
     except StopIteration:
         pass
-
     return blocks

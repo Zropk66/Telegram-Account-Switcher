@@ -1,3 +1,7 @@
+"""
+设置界面数据模型模块，管理账户列表与配置持久化映射。
+"""
+
 from typing import Dict, Any
 
 from PySide6.QtCore import Qt
@@ -7,14 +11,15 @@ from src.core.config import ConfigService
 
 
 class AccountListModel:
-    """账户列表的数据层，负责列表项的增删改查以及和 ConfigService 的同步。"""
+    """账户列表数据模型，充当 UI 控件与配置服务间的桥梁。"""
 
     def __init__(self, list_widget: QListWidget, config: ConfigService):
+        """初始化账户列表模型。"""
         self.list_widget = list_widget
         self.config = config
 
     def load_from_config(self):
-        """从配置中读取所有账户，填充到列表控件。"""
+        """从配置服务加载所有账户并填充 UI。"""
         self.list_widget.clear()
         tags_data = self.config.get_all_accounts()
         for tag_name, account_data in tags_data.items():
@@ -26,7 +31,7 @@ class AccountListModel:
         self.refresh_display()
 
     def sync_to_config(self):
-        """把列表里的数据写回配置，保持两边一致。"""
+        """将 UI 当前状态写回配置服务，保持数据同步。"""
         new_tags = {}
         for row in range(self.list_widget.count()):
             item = self.list_widget.item(row)
@@ -46,14 +51,14 @@ class AccountListModel:
         self.refresh_display()
 
     def add_account(self, data: Dict[str, Any]):
-        """往列表末尾追加一个账户。"""
+        """在列表中追加新账户并触发持久化。"""
         item = QListWidgetItem("")
         item.setData(Qt.UserRole, data)
         self.list_widget.addItem(item)
         self.sync_to_config()
 
-    def remove_current(self, sync_callback=None):
-        """删除当前选中的账户，返回是否成功。"""
+    def remove_current(self, sync_callback=None) -> bool:
+        """从列表移除当前选中项并更新配置。"""
         item = self.list_widget.currentItem()
         if item:
             row = self.list_widget.row(item)
@@ -65,12 +70,12 @@ class AccountListModel:
         return False
 
     def update_item(self, item: QListWidgetItem, data: Dict[str, Any]):
-        """用新数据替换某个列表项的内容。"""
+        """更新指定账户项数据并同步配置。"""
         item.setData(Qt.UserRole, data)
         self.sync_to_config()
 
     def refresh_display(self, default_tag: str = None):
-        """根据数据重新渲染每行的显示文本，默认账户会标注 [默认]。"""
+        """重新渲染账户列表显示文本，标记默认账户。"""
         if not default_tag:
             default_tag = self.config.default
         for row in range(self.list_widget.count()):

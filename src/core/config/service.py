@@ -1,10 +1,10 @@
 """
-配置服务主入口
+配置服务门面。
 
-对外暴露所有配置相关的操作：读写持久化字段、管理账户列表、
-密钥备份/恢复、环境扫描等。内部把存储、运行时状态、密钥管理
-等职责委托给对应模块，本类只做协调。
+本模块是系统的配置中心，协调 ConfigStorage (磁盘)、RuntimeState (内存)
+以及各功能模块的配置需求。它采用单例模式，对外提供统一的配置操作 API。
 """
+
 import os
 from copy import deepcopy
 from datetime import datetime
@@ -17,14 +17,16 @@ from src.core.config.fields import ConfigField
 from src.core.config.key_manager import TelegramKeyManager
 from src.core.config.runtime import RuntimeState
 from src.core.config.storage import ConfigStorage
-from src.core.env_service import TelegramEnvService
+from src.core.interfaces import IConfigProvider
 from src.core.utils import format_timedelta, search_file_in_dirs
 
 
-class ConfigService:
-    """配置管理门面类，单例模式"""
+class ConfigService(IConfigProvider):
+    """
+    配置服务单例门面。
+    """
 
-    # -- 持久化配置字段 --
+    # 持久化配置字段（由描述符实现自动处理）
     client: str = ConfigField("client", str, "Telegram.exe")
     path: str = ConfigField("path", str, "")
     default: str = ConfigField("default", str, "")
@@ -32,8 +34,7 @@ class ConfigService:
     log_output: bool = ConfigField("log_output", bool, True)
     agreed_to_decrypt: bool = ConfigField("agreed_to_decrypt", bool, False)
 
-    _instance = None
-    _lock = RLock()
+    # 基础默认值，作为 JSON 读取失败时的兜底
     _DEFAULT_CONFIG = {
         "client": "Telegram.exe",
         "path": "",
@@ -43,209 +44,215 @@ class ConfigService:
         "agreed_to_decrypt": False,
     }
 
+    _instance = None
+    _lock = RLock()
+
     def __new__(cls):
+        """内部方法：__new__。"""
         with cls._lock:
             if not cls._instance:
                 cls._instance = super().__new__(cls)
                 cls._instance.__initialized = False
         return cls._instance
 
-    def __init__(self):
+    def __init__(self, _storage: Optional["ConfigStorage"] = None):
+        """初始化。"""
         with self._lock:
             if self.__initialized:
                 return
 
             self._runtime = RuntimeState()
-            self._storage = ConfigStorage(
+            self._storage = _storage or ConfigStorage(
                 config_path=ConfigData.path(),
                 default_config=self._DEFAULT_CONFIG,
                 error_handler=self._error_handler
             )
+
             self._config = self._storage.load()
-
             self.__initialized = True
-            self._storage.start_auto_save(self)
 
-    def _error_handler(self, message: str) -> None:
-        """存储层回调上来的错误，转发给日志处理器"""
-        if self._log_handler:
-            try:
-                self._log_handler(message)
-            except Exception:
-                pass
+            from src.core.config.storage import InMemoryConfigStorage
+            if not isinstance(self._storage, InMemoryConfigStorage):
+                self._storage.start_auto_save(self)
 
-    # 日志处理器，由外部注入
     _log_handler: Optional[Callable[[str], None]] = None
 
     @classmethod
+    def get_instance(cls) -> "ConfigService":
+        """get_instance 方法。"""
+        return cls()
+
+    @classmethod
+    def reset_instance(cls) -> None:
+        """释放配置单例，供测试隔离使用。"""
+        with cls._lock:
+            if cls._instance is not None:
+                cls._instance.shutdown()
+            cls._instance = None
+            cls._log_handler = None
+
+    @classmethod
     def set_log_handler(cls, handler: Optional[Callable[[str], None]]) -> None:
-        """注入日志处理器，传 None 则清除。"""
+        """注入外部日志处理逻辑。"""
         cls._log_handler = handler
 
-    # -- 生命周期 --
+    def _error_handler(self, message: str) -> None:
+        """存储层错误转译。"""
+        if self._log_handler:
+            try:
+                self._log_handler(message)
+            except (RuntimeError, TypeError):
+                pass
 
     def shutdown(self) -> None:
-        """停止后台保存线程，把脏数据落盘"""
+        """停机清理：停止自动保存，执行最终落盘。"""
         self._storage.stop_auto_save()
+        # noinspection PyProtectedMember
         if self._storage._config_changed:
             self._storage.save(self._config)
 
-    def __del__(self):
-        self._storage.stop_auto_save()
-
     def __enter__(self):
-        """进入批量更新模式，期间不会触发自动保存"""
+        """进入批量更新模式（在此期间不进行磁盘同步）。"""
+        # noinspection PyProtectedMember
         self._storage._batch = True
         self._snapshot = deepcopy(self._config)
         return self
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        """退出批量更新：正常退出则保存，异常退出则回滚"""
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """退出批量更新模式：成功则落盘，异常则回滚。"""
+        # noinspection PyProtectedMember
         self._storage._batch = False
         if exc_type is not None:
             self._config = self._snapshot
+            # noinspection PyProtectedMember
             self._storage._config_changed = True
+            # 回滚后必须强制清除描述符缓存，否则读取到的仍是脏数据
+            from src.core.config.fields import ConfigField
+            for _, field in self.__class__.__dict__.items():
+                if isinstance(field, ConfigField):
+                    field.clear_cache(self)
         else:
+            # noinspection PyProtectedMember
             if self._storage._config_changed:
                 self._storage.save(self._config)
 
-    # -- 运行时属性（线程安全） --
-
     @property
     def start_time(self) -> Optional[datetime]:
-        with self._lock:
-            return self._runtime.start_time
+        """start_time 方法。"""
+        with self._lock: return self._runtime.start_time
 
     @start_time.setter
-    def start_time(self, value: Optional[datetime]) -> None:
-        with self._lock:
-            self._runtime.start_time = value
+    def start_time(self, v):
+        """start_time 方法。"""
+        with self._lock: self._runtime.start_time = v
 
     @property
     def tag(self) -> str:
-        with self._lock:
-            return self._runtime.tag
+        """tag 方法。"""
+        with self._lock: return self._runtime.tag
 
     @tag.setter
-    def tag(self, value: str) -> None:
-        with self._lock:
-            self._runtime.tag = str(value) if value is not None else ""
+    def tag(self, v):
+        """tag 方法。"""
+        with self._lock: self._runtime.tag = str(v) if v is not None else ""
 
     @property
     def force_key_login(self) -> bool:
-        with self._lock:
-            return self._runtime.force_key_login
+        """force_key_login 方法。"""
+        with self._lock: return self._runtime.force_key_login
 
     @force_key_login.setter
-    def force_key_login(self, value: bool) -> None:
-        with self._lock:
-            self._runtime.force_key_login = bool(value)
+    def force_key_login(self, v):
+        """force_key_login 方法。"""
+        with self._lock: self._runtime.force_key_login = bool(v)
 
     @property
     def pwd(self) -> str:
-        with self._lock:
-            return self._runtime.password
+        """pwd 方法。"""
+        with self._lock: return self._runtime.password
 
     @pwd.setter
-    def pwd(self, value: str) -> None:
-        with self._lock:
-            self._runtime.password = str(value) if value is not None else ""
+    def pwd(self, v):
+        """pwd 方法。"""
+        with self._lock: self._runtime.password = str(v) if v is not None else ""
 
     @property
     def decrypted(self) -> bool:
-        with self._lock:
-            return self._runtime.decrypted
+        """decrypted 方法。"""
+        with self._lock: return self._runtime.decrypted
 
     @decrypted.setter
-    def decrypted(self, value: bool) -> None:
-        with self._lock:
-            self._runtime.decrypted = bool(value)
+    def decrypted(self, v):
+        """decrypted 方法。"""
+        with self._lock: self._runtime.decrypted = bool(v)
 
     @property
     def has_backup(self) -> bool:
-        """当前 tag 对应的账户是否有完整密钥备份"""
+        """has_backup 方法。"""
         return self.has_complete_keys(self.tag)
-
-    # -- 配置访问 --
 
     @property
     def configs(self) -> Dict[str, Any]:
-        """返回配置的浅拷贝，防止外部直接修改内部字典"""
+        """获取当前配置数据的浅拷贝。"""
         return self._config.copy()
 
     @property
     def config_file(self) -> Path:
+        """config_file 方法。"""
+        # noinspection PyProtectedMember
         return self._storage._config_path
 
-    @property
-    def default_configs(self) -> Dict[str, Any]:
-        return self._DEFAULT_CONFIG.copy()
-
-    def clear_cache(self) -> None:
-        """清除所有 ConfigField 的实例缓存，下次读取会重新解析"""
-        cls = type(self)
-        for attr_name in dir(cls):
-            attr = getattr(cls, attr_name)
-            if isinstance(attr, ConfigField):
-                attr.clear_cache(self)
-
-    # -- 账户管理 --
-
     def get_all_accounts(self) -> Dict[str, Dict[str, Any]]:
-        """返回所有账户数据的副本"""
+        """get_all_accounts 方法。"""
         return dict(self.tags)
 
-    def get_account(self, tag: str) -> Dict[str, Any]:
-        """获取指定账户，不存在则返回空壳字典"""
-        tags: Dict[str, Dict[str, Any]] = self.tags
-        return tags.get(tag, {'id': '', 'folder': '', 'info': '', 'identity': '', 'key': ''})
+    def get_tag_list(self) -> list[str]:
+        """get_tag_list 方法。"""
+        return list(self.tags.keys())
 
-    def set_account(self, tag: str, account_data: Dict[str, Any]) -> None:
-        """新增或覆盖某个账户的数据"""
+    def get_account(self, tag: str) -> Dict[str, Any]:
+        """获取特定账户配置，不存在时返回空模板。"""
+        return self.tags.get(tag, {'id': '', 'folder': '', 'info': '', 'identity': '', 'key': ''})
+
+    def set_account(self, tag: str, data: Dict[str, Any]) -> None:
+        """更新/新增账户配置。"""
         with self._lock:
-            tags = dict(self.tags)
-            tags[tag] = account_data
+            tags: Dict[str, Dict[str, Any]] = dict(self.tags)
+            tags[tag] = data
             self.tags = tags
 
     def remove_account(self, tag: str) -> None:
-        """删除指定账户"""
-        tags = dict(self.tags)
+        """remove_account 方法。"""
+        tags: Dict[str, Dict[str, Any]] = self.tags.copy()
         if tag in tags:
             del tags[tag]
             self.tags = tags
 
-    def get_tag_list(self) -> list:
-        """返回所有账户标签"""
-        return list(self.tags.keys())
-
-    # -- 密钥操作 --
+    def batch_update(self, updates: Dict[str, Any]) -> None:
+        """在一次事务中应用多项配置更新。"""
+        with self:
+            for key, value in updates.items():
+                setattr(self, key, value)
 
     def login_with_keys(self, tag: str, tdata_path: str) -> bool:
-        """用配置中存储的密钥写回 tdata 目录，免密登录"""
+        """login_with_keys 方法。"""
         return TelegramKeyManager.login_with_keys(tag, tdata_path, self)
 
     def backup_account_keys(self, tag: str, folder_path: Path) -> bool:
-        """把 tdata 目录下的密钥文件备份到配置中"""
+        """backup_account_keys 方法。"""
         return TelegramKeyManager.backup_keys(tag, folder_path, self)
 
     def has_complete_keys(self, tag: str) -> bool:
-        """检查某个账户是否同时存有 identity / info / key 三份密钥"""
-        account = self.get_account(tag)
-        return bool(account.get('key') and account.get('identity') and account.get('info'))
-
-    # -- 环境扫描 --
-
-    @staticmethod
-    def scan_accounts_from_path(base_path: str, passcode: str = None) -> Dict[str, Dict[str, Any]]:
-        """扫描指定路径下所有 Telegram 账户"""
-        return TelegramEnvService.scan_accounts(base_path, passcode)
+        """has_complete_keys 方法。"""
+        acc = self.get_account(tag)
+        return all(acc.get(k) for k in ('key', 'identity', 'info'))
 
     def sync_all_account_paths(self) -> None:
-        """重新扫描 base path，更新每个账户的实际文件夹路径"""
+        """扫描磁盘目录，将账户文件夹信息与配置表进行同步。"""
         if not self.path or not os.path.isdir(self.path):
             return
 
-        updated_tags = self.tags.copy()
+        updated_tags: Dict[str, Dict[str, Any]] = self.tags.copy()
         changed = False
         for tag, info in updated_tags.items():
             real_folder = search_file_in_dirs(self.path, tag)
@@ -255,20 +262,9 @@ class ConfigService:
         if changed:
             self.tags = updated_tags
 
-    # -- 批量操作 --
-
-    def batch_update(self, updates: Dict[str, Any]) -> None:
-        """一次性更新多个配置字段，用 context manager 保证原子性"""
-        with self:
-            for field, value in updates.items():
-                if hasattr(self, field):
-                    setattr(self, field, value)
-
-    # -- 工具方法 --
-
     def watch_time(self) -> str:
-        """返回从 start_time 到现在的运行时长，格式化为中文"""
-        start = self.start_time
-        if start is None:
+        """格式化程序运行时间。"""
+        start_time = self.start_time
+        if start_time is None:
             return "0时0分0秒"
-        return format_timedelta(datetime.now() - start)
+        return format_timedelta(datetime.now() - start_time)
