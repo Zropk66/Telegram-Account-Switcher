@@ -21,9 +21,10 @@ from src.core.event_bus import (
     get_event_bus,
     PROCESS_STATUS_CHANGED,
 )
+from src.core.config import ConfigService
 from src.core.exceptions import TASException
-from src.core.interfaces import IProcessService, IConfigProvider, ILogger
 from src.core.logger import Logger
+from src.core.process_service import PsutilProcessService
 from src.core.runtime import delay
 
 # Windows API 句柄和常量，用于 WaitForSingleObject
@@ -52,15 +53,13 @@ class ProcessManager:
     协调 Telegram 的生命周期，支持优雅关闭、强制清理以及启动后的就绪检测。
     """
 
-    def __init__(self, process_service: Optional[IProcessService] = None, config: Optional[IConfigProvider] = None,
-                 logger: Optional[ILogger] = None):
+    def __init__(self, process_service: Optional[PsutilProcessService] = None, config: Optional[ConfigService] = None,
+                 logger: Optional[Logger] = None):
         """
         初始化管理器。
 
         可以通过注入 process_service 来改变底层的进程操作实现（如单元测试中的 Mock）。
         """
-        from src.core.process_service import PsutilProcessService
-        from src.core.config import ConfigService
         self._popen_ref: Optional[subprocess.Popen] = None
         self._process_service = process_service or PsutilProcessService()
         self._config = config or ConfigService()
@@ -210,7 +209,7 @@ class ProcessMonitor:
             check_interval: float = 0.5,
             test_mode: bool = False,
             event_bus=None,
-            logger: Optional[ILogger] = None,
+            logger: Optional[Logger] = None,
     ):
         """初始化。"""
         self.process_name = process_name
