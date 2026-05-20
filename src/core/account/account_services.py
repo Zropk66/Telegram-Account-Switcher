@@ -6,7 +6,8 @@ import contextlib
 from pathlib import Path
 from typing import Optional
 
-from src.core.interfaces import ILogger, IConfigProvider
+from src.core.config import ConfigService
+from src.core.logger import Logger
 
 
 def find_account_folder(base_path_str: str, tag_name: str) -> Optional[str]:
@@ -74,7 +75,7 @@ def get_key_datas_path(folder_path: Path) -> Path:
 class AccountRecoveryService:
     """处理异常切换场景，包括遗留文件夹清理与备份密钥的重建。"""
 
-    def __init__(self, logger: ILogger):
+    def __init__(self, logger: Logger):
         """初始化。"""
         self.logger = logger
 
@@ -98,7 +99,7 @@ class AccountRecoveryService:
                     except OSError:
                         continue
 
-    def recover_account(self, tag: str, config_manage: IConfigProvider) -> bool:
+    def recover_account(self, tag: str, config_manage: ConfigService) -> bool:
         """尝试使用备份密钥重新构建损坏的账户数据。"""
         self.logger.warning(f"检测到账户 '{tag}' 可能损坏，执行恢复...")
         target_account = config_manage.get_account(tag)
