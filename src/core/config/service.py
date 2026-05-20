@@ -17,11 +17,10 @@ from src.core.config.fields import ConfigField
 from src.core.config.key_manager import TelegramKeyManager
 from src.core.config.runtime import RuntimeState
 from src.core.config.storage import ConfigStorage
-from src.core.interfaces import IConfigProvider
 from src.core.utils import format_timedelta, search_file_in_dirs
 
 
-class ConfigService(IConfigProvider):
+class ConfigService:
     """
     配置服务单例门面。
     """
