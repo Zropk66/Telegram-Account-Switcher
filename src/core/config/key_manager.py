@@ -4,11 +4,11 @@ import base64
 from pathlib import Path
 from typing import Optional, Callable
 
-from src.core.interfaces import IKeyManager, IConfigProvider
+from src.core.interfaces import IConfigProvider
 from .config import PathConfig
 
 
-class TelegramKeyManager(IKeyManager):
+class TelegramKeyManager:
     """Telegram 账户密钥的备份和恢复，所有方法均为静态方法。"""
 
     _log_handler: Optional[Callable[[str], None]] = None
