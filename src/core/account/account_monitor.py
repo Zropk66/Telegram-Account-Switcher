@@ -14,6 +14,7 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 from src.core.account.account_operations import restore_default
+from src.core.config import ConfigService
 from src.core.event_bus import (
     Event,
     ProcessStatusChanged,
@@ -24,7 +25,7 @@ from src.core.event_bus import (
     ACCOUNT_LOGIN_DETECTED,
     APP_COMPLETION,
 )
-from src.core.interfaces import IConfigProvider, ILogger
+from src.core.logger import Logger
 
 
 class _ConfigsFileHandler(FileSystemEventHandler):
@@ -88,7 +89,7 @@ class AccountMonitor:
     # Watchdog 故障时的兜底轮询间隔
     _MTIME_CHECK_INTERVAL = 2.0
 
-    def __init__(self, tag: str, check_tag: str | None, config_manage: IConfigProvider, logger: ILogger,
+    def __init__(self, tag: str, check_tag: str | None, config_manage: ConfigService, logger: Logger,
                  spawn_time: datetime | None = None):
         """初始化。"""
         self.tag = tag
