@@ -10,10 +10,10 @@ from pathlib import Path
 import cryptography.exceptions
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from src.core.exceptions import TASCipherException
-from src.core.interfaces import ICipherService
+from src.core.exceptions import TASCipherException
 
 
-class AESCipher(ICipherService):
+class AESCipher:
     """AES-GCM 加密器。"""
 
     GCM_MARKER = b'\x47\x43\x4d'
