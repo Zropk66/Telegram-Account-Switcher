@@ -6,10 +6,8 @@ Telegram 账户数据解密桥接服务。
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-from src.core.interfaces import ICryptoService
 
-
-class AccountDataCryptoService(ICryptoService):
+class AccountDataCryptoService:
     """负责账户数据解密任务的服务类。"""
 
     @staticmethod
