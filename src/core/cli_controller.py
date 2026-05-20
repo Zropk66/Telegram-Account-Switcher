@@ -11,7 +11,6 @@ from typing import Optional, Tuple, Callable
 from src.core import AESCipher
 from src.core.config import ConfigService
 from src.core.exceptions import TASConfigException
-from src.core.interfaces import IConfigProvider, ILogger, ICipherService
 from src.core.logger import Logger
 from src.core.utils import search_file_in_dirs
 
@@ -29,9 +28,9 @@ class CLIController:
     def __init__(
             self,
             version: str = "2.0.0",
-            config: Optional[IConfigProvider] = None,
-            logger: Optional[ILogger] = None,
-            cipher_factory: Optional[Callable[[str], ICipherService]] = None,
+            config: Optional[ConfigService] = None,
+            logger: Optional[Logger] = None,
+            cipher_factory: Optional[Callable[[str], AESCipher]] = None,
             help_handler: Optional[HelpHandler] = None,
             settings_handler: Optional[SettingsHandler] = None,
             info_handler: Optional[InfoHandler] = None,
@@ -234,7 +233,7 @@ class CLIController:
             else:
                 self._handle_error(f"标签 '{tag}' 操作失败: {reason}")
 
-    def _process_tag(self, tag: str, operation: str, cipher: ICipherService) -> Tuple[bool, Optional[str]]:
+    def _process_tag(self, tag: str, operation: str, cipher: AESCipher) -> Tuple[bool, Optional[str]]:
         """执行单个标签的实际加密或解密操作。"""
         tag_path = search_file_in_dirs(self.config.path, tag)
         if not tag_path:
