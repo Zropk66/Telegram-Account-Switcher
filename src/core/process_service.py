@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import List
 
 import psutil
-from src.core.interfaces import ProcessInfo, IProcessService
+from src.core.interfaces import ProcessInfo
 
 
 @dataclass
@@ -26,7 +26,7 @@ class MockProcess:
         self.alive = False
 
 
-class PsutilProcessService(IProcessService):
+class PsutilProcessService:
     """真实操作系统进程服务。"""
 
     def find_processes(self, name: str) -> List[ProcessInfo]:
@@ -68,7 +68,7 @@ class PsutilProcessService(IProcessService):
             return True
 
 
-class MockProcessService(IProcessService):
+class MockProcessService:
     """内存中的进程模拟服务，用于单元测试。"""
 
     def __init__(self):
