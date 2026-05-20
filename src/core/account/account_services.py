@@ -6,7 +6,7 @@ import contextlib
 from pathlib import Path
 from typing import Optional
 
-from src.core.interfaces import ILogger, IConfigProvider, IAccountRecoveryService
+from src.core.interfaces import ILogger, IConfigProvider
 
 
 def find_account_folder(base_path_str: str, tag_name: str) -> Optional[str]:
@@ -71,7 +71,7 @@ def get_key_datas_path(folder_path: Path) -> Path:
     return folder_path / "key_datas"
 
 
-class AccountRecoveryService(IAccountRecoveryService):
+class AccountRecoveryService:
     """处理异常切换场景，包括遗留文件夹清理与备份密钥的重建。"""
 
     def __init__(self, logger: ILogger):
