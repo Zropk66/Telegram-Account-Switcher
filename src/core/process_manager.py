@@ -1,40 +1,23 @@
 """
 Telegram 客户端进程管理。
 
-封装了进程的启动、终止和监控逻辑。使用 Windows API 实现低功耗监控，
+封装了进程的启动、终止和监控逻辑。使用后台线程进行低功耗监控，
 并支持进程状态的全局事件通知。
 """
-import asyncio
 import atexit
-import ctypes
 import subprocess
 import threading
 from contextlib import suppress, contextmanager
 from pathlib import Path
-from typing import Generator, Optional
+from typing import Generator, Optional, Callable
 
 import psutil
 
-from src.core.event_bus import (
-    Event,
-    ProcessStatusChanged,
-    get_event_bus,
-    PROCESS_STATUS_CHANGED,
-)
 from src.core.config import ConfigService
 from src.core.exceptions import TASException
 from src.core.logger import Logger
 from src.core.process_service import PsutilProcessService
 from src.core.runtime import delay
-
-# Windows API 句柄和常量，用于 WaitForSingleObject
-_SYNCHRONIZE = 0x00100000
-_WAIT_OBJECT_0 = 0
-_WAIT_TIMEOUT = 0x00000102
-_WAIT_FAILED = 0xFFFFFFFF
-_INVALID_HANDLE_VALUE = -1
-
-kernel32 = ctypes.windll.kernel32
 
 # 内部标志：决定在主程序退出时是否需要清理通过 Popen 启动的子进程
 _should_reap: bool = True
@@ -88,11 +71,11 @@ class ProcessManager:
             if restart_on_exit:
                 self.start_process(wait=False)
 
-    def start_process(self, wait: bool = True):
+    def start_process(self, wait: bool = True) -> bool:
         """
         启动 Telegram。
 
-        wait=True 时会订阅事件总线，直到检测到进程已进入 Active 状态或达到 15s 超时。
+        wait=True 时会阻塞轮询，直到检测到进程已运行或达到 15s 超时。
         """
         try:
             full_path = Path(self._config.path) / self._config.client
@@ -118,31 +101,31 @@ class ProcessManager:
                 return True
 
             # 阻塞启动：需要等待进程真正运行起来
+            self._logger.debug(f"启动并等待就绪: {full_path}")
+            proc = subprocess.Popen(
+                args=str(full_path),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                shell=False,
+                start_new_session=True,
+            )
+            self._popen_ref = proc
+
             max_time = 15
-            ready_event = threading.Event()
+            poll_interval = 0.1
+            elapsed = 0.0
+            success = False
 
-            def on_process_status(payload: ProcessStatusChanged):
-                """on_process_status 方法。"""
-                if payload.is_alive:
-                    ready_event.set()
+            while elapsed < max_time:
+                if self._process_service.find_processes(self._config.client):
+                    success = True
+                    break
+                delay(poll_interval)
+                elapsed += poll_interval
 
-            get_event_bus().subscribe(PROCESS_STATUS_CHANGED, on_process_status)
-            try:
-                self._logger.debug(f"启动并等待就绪: {full_path}")
-                proc = subprocess.Popen(
-                    args=str(full_path),
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    stdin=subprocess.DEVNULL,
-                    shell=False,
-                    start_new_session=True,
-                )
-                self._popen_ref = proc
-                success = ready_event.wait(timeout=max_time)
-                if not success:
-                    self._logger.warning(f"等待进程启动超时 ({max_time}s)")
-            finally:
-                get_event_bus().unsubscribe(PROCESS_STATUS_CHANGED, on_process_status)
+            if not success:
+                self._logger.warning(f"等待进程启动超时 ({max_time}s)")
 
             return success
 
@@ -198,8 +181,7 @@ class ProcessMonitor:
     """
     高效的进程监视器。
 
-    核心逻辑是在独立线程中调用 Windows 的 WaitForSingleObject。
-    这意味着当 Telegram 运行时，监控线程是处于内核级的挂起状态，不占用 CPU 时间片。
+    核心逻辑是在独立线程中轮询及等待进程状态变更。
     """
 
     def __init__(
@@ -208,104 +190,84 @@ class ProcessMonitor:
             *,
             check_interval: float = 0.5,
             test_mode: bool = False,
-            event_bus=None,
             logger: Optional[Logger] = None,
+            process_service: Optional[PsutilProcessService] = None,
     ):
         """初始化。"""
         self.process_name = process_name
         self.check_interval = check_interval
-        self._watch_task = None
+        self._watch_thread = None
+        self._stop_event = threading.Event()
         self._logger = logger or Logger()
+        self._process_service = process_service or PsutilProcessService()
         self.last_PID = None
         self._test_mode = test_mode
-        self._event_bus = event_bus or get_event_bus()
+        self._callbacks: list[Callable[[bool, Optional[int]], None]] = []
 
-    async def start_watching(self):
+    def register_callback(self, callback: Callable[[bool, Optional[int]], None]) -> None:
+        """注册状态变更回调。"""
+        if callback not in self._callbacks:
+            self._callbacks.append(callback)
+
+    def unregister_callback(self, callback: Callable[[bool, Optional[int]], None]) -> None:
+        """移除状态变更回调。"""
+        if callback in self._callbacks:
+            self._callbacks.remove(callback)
+
+    def start_watching(self):
         """进入后台监视循环。"""
-        if self._watch_task and not self._watch_task.done():
+        if self._watch_thread and self._watch_thread.is_alive():
             raise RuntimeError("进程监视器已启动")
 
-        self._watch_task = asyncio.create_task(self._watch())
+        self._stop_event.clear()
+        self._watch_thread = threading.Thread(target=self._watch, daemon=True, name="process-monitor-core")
+        self._watch_thread.start()
 
-    async def stop_watching(self):
+    def stop_watching(self):
         """取消监视任务并等待结束。"""
-        if self._watch_task and not self._watch_task.done():
-            self._watch_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._watch_task
+        self._stop_event.set()
+        if self._watch_thread and self._watch_thread.is_alive():
+            self._watch_thread.join(timeout=2.0)
 
-    async def _watch(self):
-        """主监控循环，状态变化时通过 EventBus 发布通知。"""
+    def _watch(self):
+        """主监控循环，状态变化时触发回调。"""
         last_status = None
 
-        while True:
+        while not self._stop_event.is_set():
             try:
-                current_status = await asyncio.to_thread(self._wait_for_process_change, last_status)
+                current_status = self._wait_for_process_change(last_status)
 
                 if current_status != last_status:
-                    self._event_bus.publish(Event(
-                        PROCESS_STATUS_CHANGED,
-                        ProcessStatusChanged(
-                            is_alive=current_status,
-                            pid=self.last_PID,
-                        ),
-                    ))
+                    for cb in list(self._callbacks):
+                        try:
+                            cb(current_status, self.last_PID)
+                        except Exception as e:
+                            self._logger.exception("ProcessMonitor 回调执行失败", e)
                     last_status = current_status
 
-            except asyncio.CancelledError:
-                raise
             except Exception as e:
-                self._logger.exception(f"进程监控异常，5s 后重试", e)
-                await asyncio.sleep(5)
+                self._logger.exception(f"进程监控异常，短暂等待后重试", e)
+                self._stop_event.wait(5.0)
 
     def _wait_for_process_change(self, last_status: bool) -> bool:
         """
         阻塞等待状态变更的核心方法。
         """
-        # 情况 A: 进程运行中，调用 Windows API 挂起线程等待信号
         if last_status and self.last_PID:
-            handle = kernel32.OpenProcess(_SYNCHRONIZE, False, self.last_PID)
-            if handle and handle != _INVALID_HANDLE_VALUE:
-                try:
-                    # 1秒超时是为了能响应 asyncio 的 CancelledError
-                    result = kernel32.WaitForSingleObject(handle, 1000)
-                    if result == _WAIT_OBJECT_0:
-                        self.last_PID = None
-                        return False
-                    elif result == _WAIT_TIMEOUT:
-                        return True
-                finally:
-                    kernel32.CloseHandle(handle)
+            is_dead = self._process_service.wait_for_process(self.last_PID, timeout=1.0)
+            if is_dead:
+                self.last_PID = None
+                return False
+            else:
+                return True
 
-        # 情况 B: 进程未运行，通过 psutil 轮询查找
-        pid = self._find_process_id()
-        if pid is not None:
-            self.last_PID = pid
+        processes = self._process_service.find_processes(self.process_name)
+        if processes:
+            self.last_PID = processes[0].pid
             return True
 
-        delay(self.check_interval)
+        self._stop_event.wait(self.check_interval)
         return False
-
-    def _find_process_id(self) -> Optional[int]:
-        """定位目标进程 PID，优先校验上次记录的 PID 是否依然匹配。"""
-        try:
-            # 路径 1: 检查缓存 PID 是否有效且名称一致
-            with suppress(psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                if self.last_PID:
-                    process = psutil.Process(self.last_PID)
-                    if process.is_running() and process.name() == self.process_name:
-                        return self.last_PID
-
-            # 路径 2: 遍历所有进程寻找匹配项
-            for proc in psutil.process_iter(['name', 'pid']):
-                try:
-                    if proc.info.get('name') == self.process_name:
-                        return proc.info.get('pid')
-                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                    continue
-        except Exception as e:
-            self._logger.exception(f"遍历进程列表失败", e)
-        return None
 
 
 def _atexit_cleanup():

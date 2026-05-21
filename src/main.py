@@ -3,7 +3,6 @@ Telegram 账户切换器主入口。
 
 负责初始化全局依赖、处理命令行入口、启动进程监控，并驱动一次账户切换流程。
 """
-import asyncio
 import signal
 import sys
 import threading
@@ -22,11 +21,6 @@ from src.core.config import (
     ConfigData,
 )
 from src.core.config.key_manager import TelegramKeyManager
-from src.core.event_bus import (
-    AppCompletionEvent,
-    get_event_bus,
-    APP_COMPLETION,
-)
 from src.core.logger import set_popup_handler, set_config_provider
 from src.core.single_instance import SingleInstanceLock, SingleInstanceException
 from src.ui.adapters import create_cli_callbacks, create_popup_handler
@@ -88,8 +82,7 @@ class TASApp:
         from PySide6.QtWidgets import QApplication
         self.version = version
         self.monitor = None
-        self.loop = None
-        self._monitor_thread = None
+        self._watcher_thread = None
         self.app = QApplication.instance() or QApplication(sys.argv)
         self.ui_controller = Popup.instance()
         self.cli_controller = create_cli_controller(version)
@@ -108,43 +101,37 @@ class TASApp:
         SingleInstanceLock.cleanup()
         log_and_exit(mark=True)
 
-    async def _watcher_task(self):
+    def _watcher_task(self, account_monitor):
         """后台监控 Telegram 进程，直到收到应用完成事件。"""
-        await self.monitor.start_watching()
-        completion_event = asyncio.Event()
+        self.monitor.register_callback(account_monitor.handle_process_status)
+        self.monitor.start_watching()
 
-        def on_completion(payload: AppCompletionEvent):
-            completion_event.set()
+        completion_event = threading.Event()
+        account_monitor.register_on_completion(lambda success, msg: completion_event.set())
 
-        get_event_bus().subscribe(APP_COMPLETION, on_completion)
         try:
-            await completion_event.wait()
+            completion_event.wait()
         finally:
-            get_event_bus().unsubscribe(APP_COMPLETION, on_completion)
-        await self.monitor.stop_watching()
+            self.monitor.unregister_callback(account_monitor.handle_process_status)
+            self.monitor.stop_watching()
 
-    def start_monitoring(self):
-        """在独立守护线程中启动进程监控事件循环。"""
-        self.loop = asyncio.new_event_loop()
+    def start_monitoring(self, account_monitor):
+        """在独立守护线程中启动监控任务。"""
         self.monitor = ProcessMonitor(CONFIG.client, logger=logger)
-        self._monitor_thread = threading.Thread(
-            target=run_async_in_thread,
-            args=(self.loop, self._watcher_task()),
+        self._watcher_thread = threading.Thread(
+            target=self._watcher_task,
+            args=(account_monitor,),
             daemon=True
         )
-        self._monitor_thread.name = "process-monitor"
-        self._monitor_thread.start()
+        self._watcher_thread.name = "app-watcher-thread"
+        self._watcher_thread.start()
 
     def _join_monitor_thread(self, timeout: float = 5):
-        """等待监控线程退出，超时后停止其事件循环。"""
-        if self._monitor_thread is not None and self._monitor_thread.is_alive():
-            self._monitor_thread.join(timeout=timeout)
-            if self._monitor_thread.is_alive() and self.loop is not None and not self.loop.is_closed():
-                try:
-                    self.loop.call_soon_threadsafe(self.loop.stop)
-                except RuntimeError:
-                    pass
-        self.loop = None
+        """等待监控线程退出。"""
+        if self.monitor:
+            self.monitor.stop_watching()
+        if self._watcher_thread is not None and self._watcher_thread.is_alive():
+            self._watcher_thread.join(timeout=timeout)
 
     def run(self):
         """执行 CLI 分支或账户切换主流程，并返回进程退出码。"""
@@ -167,34 +154,30 @@ class TASApp:
 
         logger.info(f"切换账户: {CONFIG.tag or CONFIG.default}")
         logger.debug(f"Telegram路径: {CONFIG.path}")
-        self.start_monitoring()
 
         def wrapped_confirm(msg):
             with Popup.context():
                 return Popup.confirm(msg, "账户切换确认")
 
-        switched = AccountSwitcher(config=CONFIG, logger=logger).process(confirm_callback=wrapped_confirm)
+        switcher = AccountSwitcher()
+        switched = switcher.process(confirm_callback=wrapped_confirm)
         if not switched:
             logger.error("账户切换失败")
             return 1
 
+        account_monitor = switcher.monitor
+        if account_monitor:
+            self.start_monitoring(account_monitor)
+
         logger.debug("账户切换成功，等待完成")
-        self._wait_for_completion()
+        self._wait_for_completion(account_monitor)
         return 0
 
     @staticmethod
-    def _wait_for_completion():
-        """等待账户切换监控发布完成事件。"""
-        completion_event = threading.Event()
-
-        def on_completion(payload: AppCompletionEvent):
-            completion_event.set()
-
-        get_event_bus().subscribe(APP_COMPLETION, on_completion)
-        try:
-            completion_event.wait()
-        finally:
-            get_event_bus().unsubscribe(APP_COMPLETION, on_completion)
+    def _wait_for_completion(account_monitor):
+        """等待账户切换监控完成。"""
+        if account_monitor:
+            account_monitor.completion_event.wait()
 
 
 _cleanup_done = threading.Event()
@@ -210,8 +193,10 @@ def log_and_exit(mark=False):
             _cleanup_done.set()
             recovery(config=CONFIG, logger=logger)
 
-        if CONFIG and CONFIG.log_output and CONFIG.start_time and logger:
-            logger.info(f"运行时长：{CONFIG.watch_time()}")
+        if CONFIG:
+            CONFIG.shutdown()
+            if CONFIG.log_output and CONFIG.start_time and logger:
+                logger.info(f"运行时长：{CONFIG.watch_time()}")
     return None
 
 
@@ -235,22 +220,6 @@ def handle_global_exception(exc_type, exc_value, exc_traceback):
             exc_value,
             popup=True,
         )
-
-
-def run_async_in_thread(loop, coro) -> None:
-    """在线程内运行 asyncio 循环，并在退出时取消残留任务。"""
-    asyncio.set_event_loop(loop)
-    try:
-        loop.run_until_complete(coro)
-    except RuntimeError:
-        pass
-    finally:
-        pending = asyncio.all_tasks(loop)
-        for task in pending:
-            task.cancel()
-        if pending:
-            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-        loop.close()
 
 
 def main():

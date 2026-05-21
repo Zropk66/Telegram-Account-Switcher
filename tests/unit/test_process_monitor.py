@@ -4,153 +4,128 @@ ProcessMonitor 进程监控单元测试。
 验证进程监控器的核心功能，包括进程状态检测和事件发布。
 """
 import pytest
-import asyncio
+import time
 from unittest.mock import MagicMock, patch, call
 
 from src.core.process_manager import ProcessMonitor
-from src.core.event_bus import (
-    ProcessStatusChanged,
-    PROCESS_STATUS_CHANGED,
-)
 
 
 class TestProcessMonitor:
     """
-    进程生命周期异步监控的单元测试。
+    进程生命周期监控的单元测试。
     """
 
     @pytest.fixture
-    def mock_event_bus(self):
-        """提供 Mock 事件总线实例。"""
+    def mock_callback(self):
+        """提供 Mock 回调。"""
         return MagicMock()
 
     @pytest.fixture
-    def mock_psutil(self):
-        """Mock psutil 模块以隔离系统进程 API。"""
-        with patch('src.core.process_manager.psutil') as mock:
-            yield mock
+    def mock_process_service(self):
+        """Mock PsutilProcessService 模块。"""
+        with patch('src.core.process_manager.PsutilProcessService') as mock:
+            yield mock.return_value
 
-    @pytest.fixture
-    def mock_kernel32(self):
-        """Mock Windows Kernel API 以模拟进程句柄等待。"""
-        with patch('src.core.process_manager.kernel32') as mock:
-            # 默认返回超时，模拟进程仍在运行
-            mock.OpenProcess.return_value = 0x1234
-            mock.WaitForSingleObject.return_value = 0x00000102  # WAIT_TIMEOUT
-            mock.CloseHandle.return_value = True
-            yield mock
-
-    @pytest.mark.asyncio
-    async def test_monitor_detects_process_start(self, mock_event_bus, mock_psutil):
-        """验证进程启动后能准确检测并发布状态变更事件。"""
+    def test_monitor_detects_process_start(self, mock_callback, mock_process_service):
+        """验证进程启动后能准确检测并触发回调。"""
         # 初始状态：进程未运行
-        mock_psutil.process_iter.return_value = []
+        mock_process_service.find_processes.return_value = []
 
         monitor = ProcessMonitor(
             "Telegram.exe",
             check_interval=0.01,
-            event_bus=mock_event_bus
+            process_service=mock_process_service
         )
+        monitor.register_callback(mock_callback)
 
-        await monitor.start_watching()
+        monitor.start_watching()
 
         try:
-            await asyncio.sleep(0.05)
+            time.sleep(0.05)
 
             # 模拟进程被创建
             mock_process = MagicMock()
-            mock_process.info = {'name': 'Telegram.exe', 'pid': 1234}
-            mock_psutil.process_iter.return_value = [mock_process]
+            mock_process.pid = 1234
+            mock_process.name = 'Telegram.exe'
+            mock_process_service.find_processes.return_value = [mock_process]
 
-            await asyncio.sleep(0.1)
+            time.sleep(0.1)
 
-            # 检查是否已发布状态为存活的事件
-            published_events = mock_event_bus.publish.call_args_list
-            process_alive_events = [
-                call for call in published_events
-                if call[0][0].payload.is_alive
-            ]
+            # 检查是否已调用状态为存活的回调
+            calls = mock_callback.call_args_list
+            alive_calls = [c for c in calls if c[0][0] is True]
 
-            assert len(process_alive_events) > 0, "未能检测到进程启动事件"
+            assert len(alive_calls) > 0, "未能检测到进程启动回调"
 
         finally:
-            await monitor.stop_watching()
+            monitor.stop_watching()
 
-    @pytest.mark.asyncio
-    async def test_monitor_detects_process_exit(self, mock_event_bus, mock_psutil, mock_kernel32):
-        """验证进程退出后能准确检测并发布终止事件。"""
+    def test_monitor_detects_process_exit(self, mock_callback, mock_process_service):
+        """验证进程退出后能准确检测并触发回调。"""
         # 初始状态：进程已运行
         mock_process = MagicMock()
-        mock_process.info = {'name': 'Telegram.exe', 'pid': 1234}
-        mock_psutil.process_iter.return_value = [mock_process]
+        mock_process.pid = 1234
+        mock_process.name = 'Telegram.exe'
+        mock_process_service.find_processes.return_value = [mock_process]
 
         monitor = ProcessMonitor(
             "Telegram.exe",
             check_interval=0.01,
-            event_bus=mock_event_bus
+            process_service=mock_process_service
         )
+        monitor.register_callback(mock_callback)
 
-        await monitor.start_watching()
+        # 初始时，wait_for_process 模拟超时，表示进程仍在运行
+        mock_process_service.wait_for_process.return_value = False
+
+        monitor.start_watching()
 
         try:
-            await asyncio.sleep(0.1)
+            time.sleep(0.1)
 
-            # 模拟进程终止 (WAIT_OBJECT_0)
-            mock_kernel32.WaitForSingleObject.return_value = 0
-            monitor.last_PID = 1234
+            # 模拟进程终止 (wait_for_process 返回 True)
+            mock_process_service.wait_for_process.return_value = True
+            
+            # 为了防止死循环或者过快触发，我们先让 find_processes 返回空
+            mock_process_service.find_processes.return_value = []
 
-            await asyncio.sleep(0.15)
+            time.sleep(0.15)
 
-            # 检查是否已发布状态为终止的事件
-            published_events = mock_event_bus.publish.call_args_list
-            process_dead_events = [
-                call for call in published_events
-                if not call[0][0].payload.is_alive
-            ]
+            # 检查是否已调用状态为终止的回调
+            calls = mock_callback.call_args_list
+            dead_calls = [c for c in calls if c[0][0] is False]
 
-            assert len(process_dead_events) > 0, "未能检测到进程退出事件"
+            assert len(dead_calls) > 0, "未能检测到进程退出回调"
 
         finally:
-            await monitor.stop_watching()
+            monitor.stop_watching()
 
-    def test_find_process_id_uses_process_iter_pid_info(self, mock_psutil):
-        """从 psutil 进程快照中读取 pid，避免 Mock 属性泄漏到 Win32 API。"""
-        mock_process = MagicMock()
-        mock_process.info = {'name': 'Telegram.exe', 'pid': 1234}
-        mock_psutil.process_iter.return_value = [mock_process]
-
-        monitor = ProcessMonitor("Telegram.exe", event_bus=MagicMock())
-
-        assert monitor._find_process_id() == 1234
-
-    def test_monitor_zero_cpu_when_process_alive(self, mock_psutil, mock_kernel32):
-        """验证存活监控利用操作系统句柄等待而非轮询，确保零 CPU 开销。"""
+    def test_monitor_zero_cpu_when_process_alive(self, mock_process_service):
+        """验证存活监控利用 process_service.wait_for_process。"""
         monitor = ProcessMonitor(
             "Telegram.exe",
             check_interval=0.5,
-            event_bus=MagicMock()
+            process_service=mock_process_service
         )
 
         monitor.last_PID = 1234
+        
+        # 模拟等待进程结束（也就是进程死了，返回 True）
+        mock_process_service.wait_for_process.return_value = True
 
-        # 验证底层 API 调用符合零轮询开销策略
         result = monitor._wait_for_process_change(last_status=True)
 
-        mock_kernel32.OpenProcess.assert_called_once()
-        mock_kernel32.WaitForSingleObject.assert_called_once()
-        mock_kernel32.CloseHandle.assert_called_once()
+        mock_process_service.wait_for_process.assert_called_once_with(1234, timeout=1.0)
+        assert result is False
 
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_monitor_start_already_running(self):
+    def test_monitor_start_already_running(self):
         """验证监控器不可重入，防止状态污染。"""
-        monitor = ProcessMonitor("Telegram.exe", event_bus=MagicMock())
+        monitor = ProcessMonitor("Telegram.exe")
 
-        await monitor.start_watching()
+        monitor.start_watching()
 
         try:
-            with pytest.raises(RuntimeError, match="监视器已启动"):
-                await monitor.start_watching()
+            with pytest.raises(RuntimeError, match="进程监视器已启动"):
+                monitor.start_watching()
         finally:
-            await monitor.stop_watching()
+            monitor.stop_watching()
