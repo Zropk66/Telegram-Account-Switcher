@@ -82,7 +82,6 @@ class TASApp:
         from PySide6.QtWidgets import QApplication
         self.version = version
         self.monitor = None
-        self._watcher_thread = None
         self.app = QApplication.instance() or QApplication(sys.argv)
         self.ui_controller = Popup.instance()
         self.cli_controller = create_cli_controller(version)
@@ -96,42 +95,11 @@ class TASApp:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """退出时等待监控线程结束，并释放单实例锁。"""
-        self._join_monitor_thread(timeout=5)
-        SingleInstanceLock.cleanup()
-        log_and_exit(mark=True)
-
-    def _watcher_task(self, account_monitor):
-        """后台监控 Telegram 进程，直到收到应用完成事件。"""
-        self.monitor.register_callback(account_monitor.handle_process_status)
-        self.monitor.start_watching()
-
-        completion_event = threading.Event()
-        account_monitor.register_on_completion(lambda success, msg: completion_event.set())
-
-        try:
-            completion_event.wait()
-        finally:
-            self.monitor.unregister_callback(account_monitor.handle_process_status)
-            self.monitor.stop_watching()
-
-    def start_monitoring(self, account_monitor):
-        """在独立守护线程中启动监控任务。"""
-        self.monitor = ProcessMonitor(CONFIG.client, logger=logger)
-        self._watcher_thread = threading.Thread(
-            target=self._watcher_task,
-            args=(account_monitor,),
-            daemon=True
-        )
-        self._watcher_thread.name = "app-watcher-thread"
-        self._watcher_thread.start()
-
-    def _join_monitor_thread(self, timeout: float = 5):
-        """等待监控线程退出。"""
+        """退出时关闭监控并释放单实例锁。"""
         if self.monitor:
             self.monitor.stop_watching()
-        if self._watcher_thread is not None and self._watcher_thread.is_alive():
-            self._watcher_thread.join(timeout=timeout)
+        SingleInstanceLock.cleanup()
+        log_and_exit(mark=True)
 
     def run(self):
         """执行 CLI 分支或账户切换主流程，并返回进程退出码。"""
@@ -167,17 +135,18 @@ class TASApp:
 
         account_monitor = switcher.monitor
         if account_monitor:
-            self.start_monitoring(account_monitor)
-
-        logger.debug("账户切换成功，等待完成")
-        self._wait_for_completion(account_monitor)
+            logger.debug("账户切换成功，开始后台监控")
+            self.monitor = ProcessMonitor(CONFIG.client, logger=logger)
+            self.monitor.register_callback(account_monitor.handle_process_status)
+            self.monitor.start_watching()
+            try:
+                # Main thread blocks here until monitoring is done
+                account_monitor.run()
+            finally:
+                self.monitor.unregister_callback(account_monitor.handle_process_status)
+                self.monitor.stop_watching()
+            
         return 0
-
-    @staticmethod
-    def _wait_for_completion(account_monitor):
-        """等待账户切换监控完成。"""
-        if account_monitor:
-            account_monitor.completion_event.wait()
 
 
 _cleanup_done = threading.Event()

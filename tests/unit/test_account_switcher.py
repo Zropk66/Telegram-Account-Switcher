@@ -86,7 +86,7 @@ class TestAccountSwitcher:
             mock_process_manager.start_process.assert_not_called()
 
     def test_monitor_started_on_success(self, mock_config, mock_logger):
-        """验证切换成功后会启动后台账户监控线程。"""
+        """验证切换成功后会创建后台账户监控实例。"""
         mock_config.tag = mock_config.default
         mock_config.tags = {}
 
@@ -95,16 +95,13 @@ class TestAccountSwitcher:
         monitor_instance = MagicMock()
 
         with patch('src.core.account.account_switcher.AccountMonitor', return_value=monitor_instance) as mock_monitor_class, \
-             patch('src.core.account.account_switcher.restore_default'), \
-             patch('threading.Thread') as mock_thread_class:
+             patch('src.core.account.account_switcher.restore_default'):
 
             result = switcher.process()
 
             mock_monitor_class.assert_called_once()
-            mock_thread_class.assert_called_once()
-            thread_instance = mock_thread_class.return_value
-            thread_instance.start.assert_called_once()
             assert result is True
+            assert switcher.monitor is monitor_instance
 
     def test_recover_account_on_failure_with_keys(self, mock_config, mock_process_manager):
         """验证启动失败且具备完整密钥时会尝试恢复账户。"""

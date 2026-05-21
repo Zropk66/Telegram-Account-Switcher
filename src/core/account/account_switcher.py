@@ -4,7 +4,6 @@
 负责把进程控制、目录交换、失败回滚和后续监控串联成一次完整切换会话。
 """
 
-import threading
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Optional, Tuple
@@ -26,6 +25,7 @@ class AccountSwitcher:
         self.logger = Logger()
         self._process_manager = ProcessManager()
         self._recovery_service = AccountRecoveryService(self.logger)
+        self.monitor: Optional[AccountMonitor] = None
 
     @contextmanager
     def switching_session(self):
@@ -40,7 +40,7 @@ class AccountSwitcher:
                 raise
 
     def process(self, confirm_callback=None) -> bool:
-        """执行一次账户切换，并在成功后启动登录状态监控。"""
+        """执行一次账户切换，返回切换结果，并负责初始化账户监控实例。"""
         tag = self._config.tag
         check_tag = None
         needs_recovery = False
@@ -65,8 +65,7 @@ class AccountSwitcher:
 
         if success:
             if should_monitor:
-                monitor = AccountMonitor(tag, check_tag, self._config, self.logger, spawn_time=spawn_time)
-                threading.Thread(target=monitor.run, daemon=True).start()
+                self.monitor = AccountMonitor(tag, check_tag, self._config, self.logger, spawn_time=spawn_time)
             self._config.sync_all_account_paths()
             return True
 
