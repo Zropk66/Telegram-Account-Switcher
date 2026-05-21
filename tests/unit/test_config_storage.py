@@ -1,11 +1,10 @@
 """
 ConfigStorage 配置存储单元测试。
 
-验证配置文件加载、损坏回退、原子写入、字段过滤和自动保存机制。
+验证配置文件加载、损坏回退、原子写入和字段过滤。
 """
 import json
-import time
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
@@ -95,26 +94,3 @@ def test_save_filters_non_default_fields(temp_config_path, storage):
     assert "tag" not in saved_config
     assert "pwd" not in saved_config
     assert saved_config["client"] == "Test.exe"
-
-
-def test_auto_save_on_dirty_flag(temp_config_path, temp_dir):
-    """验证脏标记触发自动保存，降低配置修改丢失风险。"""
-    fast_storage = ConfigStorage(temp_config_path, DEFAULT_CONFIG)
-
-    with patch("src.core.config.storage.delay"):
-        mock_config_service = MagicMock()
-        mock_config_service._config = {**DEFAULT_CONFIG, "client": "AutoSaveTest.exe"}
-
-        fast_storage.config_changed = True
-        fast_storage.start_auto_save(mock_config_service)
-
-        time.sleep(0.2)
-        fast_storage.stop_auto_save()
-        time.sleep(0.1)
-
-    fast_storage.config_changed = True
-    fast_storage.save(mock_config_service._config)
-
-    with open(temp_config_path, "r", encoding="utf-8") as f:
-        saved_config = json.load(f)
-    assert saved_config["client"] == "AutoSaveTest.exe"

@@ -9,29 +9,21 @@ import os
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
-from threading import RLock
-from typing import Dict, Any, Optional, Callable
+from typing import Dict, Any, Optional, Callable, Type, TypeVar
 
 from src.core.config.data import ConfigData
-from src.core.config.fields import ConfigField
 from src.core.config.key_manager import TelegramKeyManager
 from src.core.config.runtime import RuntimeState
 from src.core.config.storage import ConfigStorage
 from src.core.utils import format_timedelta, search_file_in_dirs
+
+T = TypeVar('T')
 
 
 class ConfigService:
     """
     配置服务单例门面。
     """
-
-    # 持久化配置字段（由描述符实现自动处理）
-    client: str = ConfigField("client", str, "Telegram.exe")
-    path: str = ConfigField("path", str, "")
-    default: str = ConfigField("default", str, "")
-    tags: Dict[str, Dict[str, Any]] = ConfigField("tags", dict, {})
-    log_output: bool = ConfigField("log_output", bool, True)
-    agreed_to_decrypt: bool = ConfigField("agreed_to_decrypt", bool, False)
 
     # 基础默认值，作为 JSON 读取失败时的兜底
     _DEFAULT_CONFIG = {
@@ -44,35 +36,48 @@ class ConfigService:
     }
 
     _instance = None
-    _lock = RLock()
 
-    def __new__(cls):
-        """内部方法：__new__。"""
-        with cls._lock:
-            if not cls._instance:
-                cls._instance = super().__new__(cls)
-                cls._instance.__initialized = False
+    def __new__(cls, *args, **kwargs):
+        """单例模式初始化。"""
+        if not cls._instance:
+            cls._instance = super().__new__(cls)
+            cls._instance.__initialized = False
         return cls._instance
 
     def __init__(self, _storage: Optional["ConfigStorage"] = None):
         """初始化。"""
-        with self._lock:
-            if self.__initialized:
-                return
+        if self.__initialized:
+            return
 
-            self._runtime = RuntimeState()
-            self._storage = _storage or ConfigStorage(
-                config_path=ConfigData.path(),
-                default_config=self._DEFAULT_CONFIG,
-                error_handler=self._error_handler
-            )
+        self._runtime = RuntimeState()
+        self._storage = _storage or ConfigStorage(
+            config_path=ConfigData.path(),
+            default_config=self._DEFAULT_CONFIG,
+            error_handler=self._error_handler
+        )
 
-            self._config = self._storage.load()
-            self.__initialized = True
+        self._config = self._storage.load()
+        self.__initialized = True
 
-            from src.core.config.storage import InMemoryConfigStorage
-            if not isinstance(self._storage, InMemoryConfigStorage):
-                self._storage.start_auto_save(self)
+    def __enter__(self):
+        """进入批量更新模式。"""
+        # noinspection PyProtectedMember
+        self._storage._batch = True
+        self._snapshot = deepcopy(self._config)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """退出批量更新模式：成功则落盘，异常则回滚。"""
+        # noinspection PyProtectedMember
+        self._storage._batch = False
+        if exc_type is not None:
+            self._config = self._snapshot
+            # noinspection PyProtectedMember
+            self._storage._config_changed = False
+        else:
+            # noinspection PyProtectedMember
+            if self._storage._config_changed:
+                self._storage.save(self._config)
 
     _log_handler: Optional[Callable[[str], None]] = None
 
@@ -84,11 +89,10 @@ class ConfigService:
     @classmethod
     def reset_instance(cls) -> None:
         """释放配置单例，供测试隔离使用。"""
-        with cls._lock:
-            if cls._instance is not None:
-                cls._instance.shutdown()
-            cls._instance = None
-            cls._log_handler = None
+        if cls._instance is not None:
+            cls._instance.shutdown()
+        cls._instance = None
+        cls._log_handler = None
 
     @classmethod
     def set_log_handler(cls, handler: Optional[Callable[[str], None]]) -> None:
@@ -104,86 +108,140 @@ class ConfigService:
                 pass
 
     def shutdown(self) -> None:
-        """停机清理：停止自动保存，执行最终落盘。"""
-        self._storage.stop_auto_save()
+        """停机清理：执行最终落盘。"""
         # noinspection PyProtectedMember
         if self._storage._config_changed:
             self._storage.save(self._config)
 
-    def __enter__(self):
-        """进入批量更新模式（在此期间不进行磁盘同步）。"""
-        # noinspection PyProtectedMember
-        self._storage._batch = True
-        self._snapshot = deepcopy(self._config)
-        return self
+    def _get_field(self, name: str, expected_type: Type[T], default_value: T) -> T:
+        """获取配置字段值，支持缓存/类型恢复与默认值降级。"""
+        value = self._config.get(name)
+        if value is None:
+            return default_value
+        if not isinstance(value, expected_type):
+            try:
+                value = expected_type(value)
+            except (ValueError, TypeError):
+                value = default_value
+        return value
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """退出批量更新模式：成功则落盘，异常则回滚。"""
+    def _set_field(self, name: str, expected_type: Type[T], value: Any) -> None:
+        """设置配置字段值，并触发持久化落盘。"""
+        if value is not None and not isinstance(value, expected_type):
+            raise TypeError(
+                f"字段 '{name}' 类型错误：期望 {expected_type.__name__}, 实际为 {type(value).__name__}"
+            )
+
+        self._config[name] = value
         # noinspection PyProtectedMember
-        self._storage._batch = False
-        if exc_type is not None:
-            self._config = self._snapshot
-            # noinspection PyProtectedMember
-            self._storage._config_changed = True
-            # 回滚后必须强制清除描述符缓存，否则读取到的仍是脏数据
-            from src.core.config.fields import ConfigField
-            for _, field in self.__class__.__dict__.items():
-                if isinstance(field, ConfigField):
-                    field.clear_cache(self)
-        else:
-            # noinspection PyProtectedMember
-            if self._storage._config_changed:
-                self._storage.save(self._config)
+        self._storage._config_changed = True
+        # noinspection PyProtectedMember
+        if not self._storage._batch:
+            self._storage.save(self._config)
+
+    @property
+    def client(self) -> str:
+        """客户端名称。"""
+        return self._get_field("client", str, "Telegram.exe")
+
+    @client.setter
+    def client(self, value: str) -> None:
+        self._set_field("client", str, value)
+
+    @property
+    def path(self) -> str:
+        """数据目录路径。"""
+        return self._get_field("path", str, "")
+
+    @path.setter
+    def path(self, value: str) -> None:
+        self._set_field("path", str, value)
+
+    @property
+    def default(self) -> str:
+        """默认账号 tag。"""
+        return self._get_field("default", str, "")
+
+    @default.setter
+    def default(self, value: str) -> None:
+        self._set_field("default", str, value)
+
+    @property
+    def tags(self) -> Dict[str, Dict[str, Any]]:
+        """账号配置数据映射表。"""
+        return self._get_field("tags", dict, {})
+
+    @tags.setter
+    def tags(self, value: Dict[str, Dict[str, Any]]) -> None:
+        self._set_field("tags", dict, value)
+
+    @property
+    def log_output(self) -> bool:
+        """是否输出日志。"""
+        return self._get_field("log_output", bool, True)
+
+    @log_output.setter
+    def log_output(self, value: bool) -> None:
+        self._set_field("log_output", bool, value)
+
+    @property
+    def agreed_to_decrypt(self) -> bool:
+        """是否同意解密 Telegram key_datas。"""
+        return self._get_field("agreed_to_decrypt", bool, False)
+
+    @agreed_to_decrypt.setter
+    def agreed_to_decrypt(self, value: bool) -> None:
+        self._set_field("agreed_to_decrypt", bool, value)
 
     @property
     def start_time(self) -> Optional[datetime]:
         """start_time 方法。"""
-        with self._lock: return self._runtime.start_time
+        return self._runtime.start_time
 
     @start_time.setter
     def start_time(self, v):
         """start_time 方法。"""
-        with self._lock: self._runtime.start_time = v
+        self._runtime.start_time = v
 
     @property
     def tag(self) -> str:
         """tag 方法。"""
-        with self._lock: return self._runtime.tag
+        return self._runtime.tag
 
     @tag.setter
     def tag(self, v):
         """tag 方法。"""
-        with self._lock: self._runtime.tag = str(v) if v is not None else ""
+        self._runtime.tag = str(v) if v is not None else ""
 
     @property
     def force_key_login(self) -> bool:
         """force_key_login 方法。"""
-        with self._lock: return self._runtime.force_key_login
+        return self._runtime.force_key_login
 
     @force_key_login.setter
     def force_key_login(self, v):
         """force_key_login 方法。"""
-        with self._lock: self._runtime.force_key_login = bool(v)
+        self._runtime.force_key_login = bool(v)
 
     @property
     def pwd(self) -> str:
         """pwd 方法。"""
-        with self._lock: return self._runtime.password
+        return self._runtime.password
 
     @pwd.setter
     def pwd(self, v):
         """pwd 方法。"""
-        with self._lock: self._runtime.password = str(v) if v is not None else ""
+        self._runtime.password = str(v) if v is not None else ""
 
     @property
     def decrypted(self) -> bool:
         """decrypted 方法。"""
-        with self._lock: return self._runtime.decrypted
+        return self._runtime.decrypted
 
     @decrypted.setter
     def decrypted(self, v):
         """decrypted 方法。"""
-        with self._lock: self._runtime.decrypted = bool(v)
+        self._runtime.decrypted = bool(v)
 
     @property
     def has_backup(self) -> bool:
@@ -215,10 +273,9 @@ class ConfigService:
 
     def set_account(self, tag: str, data: Dict[str, Any]) -> None:
         """更新/新增账户配置。"""
-        with self._lock:
-            tags: Dict[str, Dict[str, Any]] = dict(self.tags)
-            tags[tag] = data
-            self.tags = tags
+        tags: Dict[str, Dict[str, Any]] = dict(self.tags)
+        tags[tag] = data
+        self.tags = tags
 
     def remove_account(self, tag: str) -> None:
         """remove_account 方法。"""
