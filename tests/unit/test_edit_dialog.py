@@ -1,17 +1,10 @@
-"""
-EditLabelDialog 对话框单元测试。
-
-验证账户编辑对话框的输入校验、默认账户标记和数据提取逻辑。
-"""
+"""账户编辑对话框单元测试。"""
 import os
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-# 设置 offscreen 模式，避免单元测试依赖真实显示器环境
-os.environ["QT_QPA_PLATFORM"] = "offscreen"
-
-from PySide6.QtWidgets import QApplication
 from src.ui.dialogs import EditLabelDialog
+
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 
 class TestEditLabelDialog:

@@ -1,26 +1,17 @@
-"""
-SettingsController 设置控制器单元测试。
-
-验证设置界面控制器与配置服务、账户模型和异步任务之间的协作逻辑。
-"""
+"""设置控制器单元测试。"""
 import os
-import pytest
-from unittest.mock import patch, MagicMock, call
-from pathlib import Path
-
-# 设置 offscreen 模式，避免单元测试依赖真实显示器环境
-os.environ["QT_QPA_PLATFORM"] = "offscreen"
-
+from unittest.mock import MagicMock
 from PySide6.QtWidgets import QListWidget, QLineEdit
-from PySide6.QtCore import QThreadPool, Qt
 from src.ui.settings_ui import SettingsController
-from src.core.config import ConfigService
+
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 
 class MockSettingsWindow:
     """为 SettingsController 提供最小可用的设置窗口替身。"""
 
     def __init__(self):
+        """初始化模拟窗口。"""
         self.ui = MagicMock()
         self.ui.client_edit = QLineEdit()
         self.ui.path_edit = QLineEdit()
@@ -28,13 +19,14 @@ class MockSettingsWindow:
         self.current_configs = {}
 
     def update_current_config(self, key, value):
+        """更新临时配置。"""
         self.current_configs[key] = value
 
 
 class TestSettingsController:
     """验证设置控制器的主要用户操作路径。"""
 
-    def test_search_client_async_updates_fields(self, mock_config, monkeypatch):
+    def test_search_client_in_background_updates_fields(self, mock_config, monkeypatch):
         """验证客户端搜索完成后，路径与进程名能同步回填到界面和临时配置。"""
         window = MockSettingsWindow()
         window.current_configs = {}
@@ -44,14 +36,15 @@ class TestSettingsController:
         mock_result = ("Telegram.exe", "/path/to/telegram")
 
         def mock_run_search_client(pool, finished_callback, error_callback):
+            """模拟后台搜索客户端。"""
             finished_callback(mock_result)
 
         monkeypatch.setattr(
-            "src.ui.settings_ui.AsyncTaskRunner.run_search_client",
+            "src.ui.settings_ui.BackgroundTaskRunner.run_search_client",
             mock_run_search_client
         )
 
-        controller.search_client_async()
+        controller.search_client_in_background()
 
         assert window.ui.client_edit.text() == "Telegram.exe"
         assert window.ui.path_edit.text() == "/path/to/telegram"
@@ -75,6 +68,7 @@ class TestSettingsController:
         )
 
         def mock_scan(base_path, passcode):
+            """模拟扫描账户。"""
             return {
                 "tdata-existing": {"tag": "existing", "id": "1", "folder": "tdata-existing"},
                 "tdata-new": {"tag": "new", "id": "2", "folder": "tdata-new"}
@@ -117,6 +111,7 @@ class TestSettingsController:
         monkeypatch.setattr("src.ui.settings_ui.AccountScannerHelper.get_existing_folders", lambda _: set())
 
         def mock_scan(*args, **kwargs):
+            """模拟空扫描。"""
             return {}
 
         monkeypatch.setattr(
@@ -130,7 +125,7 @@ class TestSettingsController:
         assert window.current_configs.get("agreed_to_decrypt") is True
 
     def test_save_config_event_calls_batch_update(self, mock_config, monkeypatch):
-        """验证保存配置时使用批量更新入口，保持配置提交的原子性。"""
+        """验证保存配置时使用批量更新入口，保持配置提交的一致性。"""
         test_configs = {"test": "value"}
         mock_config.batch_update = MagicMock()
 

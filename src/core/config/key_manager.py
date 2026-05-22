@@ -1,26 +1,28 @@
-"""Telegram 密钥的备份与恢复，通过 base64 编码存储密钥文件实现免密登录。"""
+"""密钥管理器。"""
+from __future__ import annotations
 
 import base64
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Optional, Callable, TYPE_CHECKING
 
-from src.core.interfaces import IConfigProvider
+if TYPE_CHECKING:
+    from .service import ConfigService
 from .config import PathConfig
 
 
 class TelegramKeyManager:
-    """Telegram 账户密钥的备份和恢复，所有方法均为静态方法。"""
+    """密钥管理器。"""
 
     _log_handler: Optional[Callable[[str], None]] = None
 
     @classmethod
     def set_log_handler(cls, handler: Optional[Callable[[str], None]]) -> None:
-        """设置日志处理器，传入 None 则清除。"""
+        """设置错误日志处理器。"""
         cls._log_handler = handler
 
     @classmethod
     def _log_error(cls, message: str) -> None:
-        """通过 _log_handler 输出错误日志，处理器异常时静默忽略。"""
+        """记录错误日志。"""
         if cls._log_handler:
             try:
                 cls._log_handler(message)
@@ -28,8 +30,8 @@ class TelegramKeyManager:
                 pass
 
     @staticmethod
-    def backup_keys(tag: str, folder_path: Path, config_service: IConfigProvider) -> bool:
-        """从 tdata 目录读取密钥文件，base64 编码后存入配置。"""
+    def backup_keys(tag: str, folder_path: Path, config_service: ConfigService) -> bool:
+        """从账户文件夹中读取并备份登录凭证密钥。"""
         try:
             identity_path = PathConfig.get_identity_path(folder_path)
             info_path = PathConfig.get_info_path(folder_path)
@@ -53,8 +55,8 @@ class TelegramKeyManager:
             return False
 
     @staticmethod
-    def login_with_keys(tag: str, tdata_path: str, config_service: IConfigProvider) -> bool:
-        """从配置中读取密钥，解码后写入 tdata 目录实现免密登录。"""
+    def login_with_keys(tag: str, tdata_path: str, config_service: ConfigService) -> bool:
+        """从备份的密钥还原无密码登录状态。"""
         if not config_service.has_complete_keys(tag):
             return False
 

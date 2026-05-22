@@ -1,10 +1,7 @@
-"""
-AESCipher 加密模块单元测试。
-
-验证 AES-GCM 加密实现的边界行为、往返一致性和完整性保护能力。
-"""
-import pytest
+"""加密模块单元测试。"""
 from pathlib import Path
+
+import pytest
 
 from src.core.crypto import AESCipher
 from src.core.exceptions import TASCipherException

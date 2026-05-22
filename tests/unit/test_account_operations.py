@@ -1,18 +1,11 @@
-"""
-account_operations 模块单元测试。
+"""账户切换逻辑单元测试。"""
 
-验证账户切换的核心逻辑，包含账户数据加密/解密、目录原子交换及异常状态下的紧急恢复机制。
-"""
+from unittest.mock import MagicMock, patch
 
 import pytest
-from unittest.mock import MagicMock, patch, call
-from pathlib import Path
 
 from src.core.account import account_operations
-from src.core.interfaces import (
-    IConfigProvider, ILogger, ICipherService
-)
-from src.core.exceptions import TASException, TASCipherException
+from src.core.exceptions import TASCipherException
 
 
 class TestP0AccountOperations:
@@ -20,25 +13,27 @@ class TestP0AccountOperations:
 
     @pytest.fixture(autouse=True)
     def setup_mocks(self, mock_config, mock_logger):
+        """初始化测试模拟对象。"""
         with patch('src.core.account.account_operations.configs', mock_config), \
              patch('src.core.account.account_operations.logger', mock_logger):
             yield
 
     def test_restore_default_encrypts_current(self, mock_config, mock_logger, mock_account_fs):
-        """验证恢复默认账户前，已正确加密当前活跃账户数据。"""
+        """验证恢复默认账户前正确加密活跃账户数据。"""
         mock_config.default = "default_account"
         mock_config.decrypted = True
         mock_config.tag = "current_account"
         mock_config.path = "/tmp/test_tas"
         mock_config.pwd = "test_password"
 
-        cipher = MagicMock(spec=ICipherService)
-        cipher.encrypt.return_value = True
-
         mock_account_fs.find_account_folder.side_effect = lambda _, tag: (
             "tdata-current" if tag == "current_account" else "tdata-default"
         )
         mock_account_fs.swap_active_tdata_with_target.return_value = True
+
+        from src.core.crypto import AESCipher
+        cipher = MagicMock(spec=AESCipher)
+        cipher.encrypt.return_value = True
 
         with patch('src.core.account.account_operations.AESCipher', return_value=cipher), \
              patch('src.core.account.account_operations.find_account_folder', mock_account_fs.find_account_folder), \
@@ -60,7 +55,8 @@ class TestP0AccountOperations:
         mock_config.decrypted = False
         mock_config.path = "/tmp/test_tas"
 
-        cipher = MagicMock(spec=ICipherService)
+        from src.core.crypto import AESCipher
+        cipher = MagicMock(spec=AESCipher)
         cipher.decrypt.return_value = True
 
         mock_account_fs.find_account_folder.return_value = "tdata-target"
@@ -87,7 +83,8 @@ class TestP0AccountOperations:
         mock_config.login_with_keys.return_value = True
         mock_config.path = "/tmp/test_tas"
 
-        cipher = MagicMock(spec=ICipherService)
+        from src.core.crypto import AESCipher
+        cipher = MagicMock(spec=AESCipher)
         mock_account_fs.find_account_folder.return_value = None
 
         with patch('src.core.account.account_operations.AESCipher', return_value=cipher), \
@@ -110,12 +107,13 @@ class TestP0AccountOperations:
         mock_config.path = "/tmp/test_tas"
         mock_config.pwd = "test_password"
 
-        cipher = MagicMock(spec=ICipherService)
+        from src.core.crypto import AESCipher
+        cipher = MagicMock(spec=AESCipher)
         cipher.decrypt.return_value = True
 
-        # 前 4 次模拟文件被占用，第 5 次成功
         call_count = [0]
         def mock_swap(*args, **kwargs):
+            """模拟目录交换行为。"""
             call_count[0] += 1
             if call_count[0] < 5:
                 raise PermissionError("File locked")
@@ -143,7 +141,8 @@ class TestP0AccountOperations:
         mock_config.path = "/tmp/test_tas"
         mock_config.pwd = "test_password"
 
-        cipher = MagicMock(spec=ICipherService)
+        from src.core.crypto import AESCipher
+        cipher = MagicMock(spec=AESCipher)
         mock_account_fs.find_account_folder.return_value = None
 
         with patch('src.core.account.account_operations.AESCipher', return_value=cipher), \
@@ -167,10 +166,12 @@ class TestP0AccountOperations:
         mock_config.path = "/tmp/test_tas"
         mock_config.pwd = "test_password"
 
-        cipher = MagicMock(spec=ICipherService)
+        from src.core.crypto import AESCipher
+        cipher = MagicMock(spec=AESCipher)
 
         decrypt_calls = [0]
         def mock_decrypt(*args, **kwargs):
+            """模拟数据解密行为。"""
             decrypt_calls[0] += 1
             if decrypt_calls[0] == 1:
                 raise TASCipherException("Corrupted key")
@@ -217,3 +218,19 @@ class TestRecovery:
             with patch.object(account_operations, 'restore_default', return_value=True):
                 account_operations.recovery()
                 mock_pm.kill_process.assert_called_once_with("Telegram.exe")
+
+    def test_recovery_with_arguments(self):
+        """验证紧急恢复支持传入自定义 config 和 logger 参数。"""
+        mock_config = MagicMock()
+        mock_config.client = "CustomClient.exe"
+        mock_logger = MagicMock()
+
+        with patch('src.core.account.account_operations.ProcessManager') as MockPM:
+            mock_pm = MockPM.return_value
+            mock_pm.kill_process.return_value = True
+
+            with patch.object(account_operations, 'restore_default', return_value=True) as mock_restore:
+                account_operations.recovery(config=mock_config, logger=mock_logger)
+                mock_pm.kill_process.assert_called_once_with("CustomClient.exe")
+                mock_restore.assert_called_once()
+

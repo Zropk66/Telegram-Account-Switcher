@@ -1,8 +1,4 @@
-"""
-运行时工具。
-
-提供生产流程需要的延迟和临时目录命名能力。
-"""
+"""运行时工具。"""
 import secrets
 import time
 
@@ -13,5 +9,5 @@ def delay(seconds: float) -> None:
 
 
 def generate_temp_name() -> str:
-    """生成账户切换过程中使用的临时 tdata 目录名。"""
+    """生成临时目录名。"""
     return f"tdata-{secrets.token_hex(4)}"

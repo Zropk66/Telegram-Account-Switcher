@@ -1,15 +1,11 @@
-"""
-TaskRunner 异步任务运行器单元测试。
-
-验证任务执行结果能映射到正确的 Qt 信号，确保 UI 层可以区分成功、业务异常和未知异常。
-"""
+"""任务运行器单元测试。"""
 import os
+
 import pytest
-from PySide6.QtTest import QSignalSpy
 from PySide6.QtWidgets import QApplication
 
-from src.ui.settings_services import TaskRunner
 from src.core import TASException
+from src.ui.settings_services import TaskRunner
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
@@ -30,6 +26,7 @@ def test_run_emits_finished_on_success(qapp):
     captured = []
 
     def success_func():
+        """成功返回结果的函数。"""
         return test_result
 
     runner = TaskRunner(success_func)
@@ -47,6 +44,7 @@ def test_run_emits_error_on_tas_exception(qapp):
     captured_errors = []
 
     def tas_error_func():
+        """抛出业务异常的函数。"""
         raise test_error
 
     runner = TaskRunner(tas_error_func)
@@ -64,6 +62,7 @@ def test_run_emits_exception_on_generic_error(qapp):
     captured_exceptions = []
 
     def generic_error_func():
+        """抛出未知异常的函数。"""
         raise test_exception
 
     runner = TaskRunner(generic_error_func)

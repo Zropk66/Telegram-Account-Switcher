@@ -1,9 +1,7 @@
-"""
-CLIController 命令行控制器单元测试。
-
-验证命令行参数解析、配置检查、标签回退以及批量加解密操作的控制流程。
-"""
+"""命令行控制器单元测试。"""
 from unittest.mock import patch, MagicMock
+
+from src.core.cli_controller import CLIAction
 
 
 def test_parse_switch_with_tag(mock_config, mock_logger):
@@ -12,12 +10,7 @@ def test_parse_switch_with_tag(mock_config, mock_logger):
 
     cli = CLIController(
         config=mock_config,
-        logger=mock_logger,
-        help_handler=None,
-        settings_handler=None,
-        info_handler=None,
-        warning_handler=None,
-        error_handler=None
+        logger=mock_logger
     )
 
     with patch('sys.argv', ['tas', '-s', 'account1']):
@@ -150,6 +143,7 @@ def test_handle_encrypt_all_tags(mock_config, mock_logger):
     mock_cipher = MagicMock()
 
     def cipher_factory(pwd):
+        """模拟创建密码器。"""
         return mock_cipher
 
     cli._cipher_factory = cipher_factory
@@ -170,7 +164,7 @@ def test_handle_encrypt_all_tags(mock_config, mock_logger):
                 args.settings = False
 
                 result = cli.handle_actions(args)
-                assert result is True
+                assert result == CLIAction.EXIT
 
                 assert cli._process_tag.call_count == 2
                 call_args = cli._process_tag.call_args_list
@@ -197,6 +191,7 @@ def test_handle_decrypt_all_tags(mock_config, mock_logger):
     mock_cipher = MagicMock()
 
     def cipher_factory(pwd):
+        """模拟创建密码器。"""
         return mock_cipher
 
     cli._cipher_factory = cipher_factory
@@ -217,7 +212,7 @@ def test_handle_decrypt_all_tags(mock_config, mock_logger):
                 args.settings = False
 
                 result = cli.handle_actions(args)
-                assert result is True
+                assert result == CLIAction.EXIT
 
                 assert cli._process_tag.call_count == 2
                 call_args = cli._process_tag.call_args_list

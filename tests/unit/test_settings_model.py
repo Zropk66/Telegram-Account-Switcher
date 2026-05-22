@@ -1,18 +1,14 @@
-"""
-AccountListModel 账户列表模型单元测试。
-
-验证账户列表 UI 数据模型的功能，包括数据的加载、增删、持久化同步及 UI 显示属性管理。
-"""
+"""账户列表模型单元测试。"""
 import os
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QListWidget, QApplication
 
-# 设置 offscreen 模式，避免单元测试依赖真实显示器环境
-os.environ["QT_QPA_PLATFORM"] = "offscreen"
-
 from src.ui.settings_model import AccountListModel
+
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 
 @pytest.fixture(scope="module")
@@ -27,7 +23,7 @@ def qapp():
 
 @pytest.fixture
 def list_widget(qapp):
-    """提供一个用于 UI 测试的 QListWidget 实例。"""
+    """提供 UI 测试的 QListWidget 实例。"""
     return QListWidget()
 
 
@@ -58,13 +54,11 @@ def test_load_from_config_populates_list(model, list_widget, mock_config):
 
     assert list_widget.count() == 2
 
-    # 验证第一个账户数据映射
     item1 = list_widget.item(0)
     data1 = item1.data(Qt.UserRole)
     assert data1["tag"] == "account1"
     assert data1["id"] == "123"
 
-    # 验证第二个账户数据映射
     item2 = list_widget.item(1)
     data2 = item2.data(Qt.UserRole)
     assert data2["tag"] == "account2"
@@ -85,7 +79,6 @@ def test_add_account_syncs_to_config(model, list_widget, mock_config):
     model.add_account(account_data)
 
     assert list_widget.count() == 1
-    # 验证配置中心已更新
     assert mock_config.tags == {"new_account": {
         "id": "789",
         "folder": "tdata_new",
@@ -120,11 +113,9 @@ def test_refresh_display_marks_default(model, list_widget, mock_config):
 
     model.load_from_config()
 
-    # 验证默认项包含标记
     item1 = list_widget.item(0)
     assert "[默认]" in item1.text()
 
-    # 验证非默认项不包含标记
     item2 = list_widget.item(1)
     assert "[默认]" not in item2.text()
 

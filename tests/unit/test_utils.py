@@ -1,23 +1,18 @@
-"""
-核心工具函数单元测试。
-
-验证原子重命名和账户标签目录搜索在正常路径、异常回滚及边界输入下的行为。
-"""
-from pathlib import Path
+"""核心工具单元测试。"""
 
 import pytest
 
-from src.core.utils import atomic_rename, search_file_in_dirs
+from src.core.utils import safe_rename, search_file_in_dirs
 
 
-def test_atomic_rename_success(tmp_path):
-    """验证原子重命名成功后，源路径被替换为目标路径。"""
+def test_safe_rename_success(tmp_path):
+    """验证安全重命名成功后，源路径被替换为目标路径。"""
     src = tmp_path / "source.txt"
     dst = tmp_path / "destination.txt"
 
     src.write_text("test content", encoding="utf-8")
 
-    with atomic_rename(src, dst):
+    with safe_rename(src, dst):
         pass
 
     assert not src.exists()
@@ -25,7 +20,7 @@ def test_atomic_rename_success(tmp_path):
     assert dst.read_text(encoding="utf-8") == "test content"
 
 
-def test_atomic_rename_rollback_on_exception(tmp_path):
+def test_safe_rename_rollback_on_exception(tmp_path):
     """验证上下文中断时会尽量恢复原始文件位置。"""
     src = tmp_path / "source.txt"
     dst = tmp_path / "destination.txt"
@@ -33,10 +28,11 @@ def test_atomic_rename_rollback_on_exception(tmp_path):
     src.write_text("test content", encoding="utf-8")
 
     class TestException(Exception):
+        """测试异常类。"""
         pass
 
     with pytest.raises(TestException):
-        with atomic_rename(src, dst):
+        with safe_rename(src, dst):
             raise TestException("intentional failure")
 
     assert src.exists()
@@ -44,12 +40,12 @@ def test_atomic_rename_rollback_on_exception(tmp_path):
     assert src.read_text(encoding="utf-8") == "test content"
 
 
-def test_atomic_rename_src_not_exists(tmp_path):
+def test_safe_rename_src_not_exists(tmp_path):
     """验证源路径不存在时保持幂等，适配首次启动或空目录场景。"""
     src = tmp_path / "not_exists.txt"
     dst = tmp_path / "destination.txt"
 
-    with atomic_rename(src, dst):
+    with safe_rename(src, dst):
         pass
 
     assert not src.exists()

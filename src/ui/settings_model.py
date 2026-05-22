@@ -1,6 +1,4 @@
-"""
-设置界面数据模型模块，管理账户列表与配置持久化映射。
-"""
+"""账户列表数据模型。"""
 
 from typing import Dict, Any
 
@@ -11,15 +9,15 @@ from src.core.config import ConfigService
 
 
 class AccountListModel:
-    """账户列表数据模型，充当 UI 控件与配置服务间的桥梁。"""
+    """账户列表界面数据模型。"""
 
     def __init__(self, list_widget: QListWidget, config: ConfigService):
-        """初始化账户列表模型。"""
+        """初始化账户列表数据模型。"""
         self.list_widget = list_widget
         self.config = config
 
     def load_from_config(self):
-        """从配置服务加载所有账户并填充 UI。"""
+        """从配置文件中加载账户数据到列表中。"""
         self.list_widget.clear()
         tags_data = self.config.get_all_accounts()
         for tag_name, account_data in tags_data.items():
@@ -31,7 +29,7 @@ class AccountListModel:
         self.refresh_display()
 
     def sync_to_config(self):
-        """将 UI 当前状态写回配置服务，保持数据同步。"""
+        """同步数据到配置文件。"""
         new_tags = {}
         for row in range(self.list_widget.count()):
             item = self.list_widget.item(row)
@@ -51,14 +49,14 @@ class AccountListModel:
         self.refresh_display()
 
     def add_account(self, data: Dict[str, Any]):
-        """在列表中追加新账户并触发持久化。"""
+        """向列表中追加账户数据。"""
         item = QListWidgetItem("")
         item.setData(Qt.UserRole, data)
         self.list_widget.addItem(item)
         self.sync_to_config()
 
     def remove_current(self, sync_callback=None) -> bool:
-        """从列表移除当前选中项并更新配置。"""
+        """移除选定账户。"""
         item = self.list_widget.currentItem()
         if item:
             row = self.list_widget.row(item)
@@ -70,12 +68,12 @@ class AccountListModel:
         return False
 
     def update_item(self, item: QListWidgetItem, data: Dict[str, Any]):
-        """更新指定账户项数据并同步配置。"""
+        """更新列表中指定行的数据。"""
         item.setData(Qt.UserRole, data)
         self.sync_to_config()
 
     def refresh_display(self, default_tag: str = None):
-        """重新渲染账户列表显示文本，标记默认账户。"""
+        """刷新列表中各账户行的文本显示。"""
         if not default_tag:
             default_tag = self.config.default
         for row in range(self.list_widget.count()):

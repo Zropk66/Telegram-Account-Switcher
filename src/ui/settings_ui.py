@@ -1,7 +1,5 @@
 """
-设置窗口界面逻辑模块。
-
-实现应用主设置页面的交互，包含客户端路径配置、账户列表管理及配置持久化。
+设置界面与账户管理交互逻辑。
 """
 
 import os
@@ -9,7 +7,7 @@ import sys
 from contextlib import suppress
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThreadPool, Slot, QPoint
+from PySide6.QtCore import Qt, QThreadPool, Slot, QPoint, QObject
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QMainWindow, QFileDialog, QApplication, QMenu, QDialog
 
@@ -22,12 +20,12 @@ from src.ui.settings_model import AccountListModel
 from src.ui.ui_settings import Ui_setting
 from src.ui.utils import (
     DoubleClickFilter,
-    AccountScannerHelper, AsyncTaskRunner, DialogFactory
+    AccountScannerHelper, BackgroundTaskRunner, DialogFactory
 )
 
 
 def open_settings_window(version):
-    """设置窗口入口，初始化 GUI 事件循环。"""
+    """打开设置窗口。"""
     app = QApplication.instance() or QApplication(sys.argv)
     widget = SettingsWindow(version)
     app._settings_window = widget
@@ -35,26 +33,28 @@ def open_settings_window(version):
     return app.exec()
 
 
-class SettingsController:
-    """负责处理设置界面的业务逻辑。"""
+class SettingsController(QObject):
+    """设置控制类，负责处理耗时任务与数据接口的交互逻辑。"""
 
     def __init__(self, window: 'SettingsWindow'):
-        """初始化。"""
+        """初始化设置控制器。"""
+        super().__init__()
         self.window = window
         self.config = ConfigService()
         self.model = AccountListModel(window.ui.tags_widget, self.config)
         self.thread_pool = QThreadPool.globalInstance()
 
-    def search_client_async(self):
-        """后台异步搜索 Telegram 客户端路径。"""
-        AsyncTaskRunner.run_search_client(
+    def search_client_in_background(self):
+        """启动后台线程搜索 Telegram 客户端。"""
+        BackgroundTaskRunner.run_search_client(
             self.thread_pool,
             self._on_search_client_finished,
             self._on_error
         )
 
+    @Slot(object)
     def _on_search_client_finished(self, result):
-        """内部方法：_on_search_client_finished。"""
+        """处理客户端搜索成功事件。"""
         client, path = result
         self.window.ui.client_edit.setText(client)
         self.window.ui.path_edit.setText(path)
@@ -62,18 +62,17 @@ class SettingsController:
         self.window.update_current_config('path', path)
         Logger().info(f"有效客户端 -> {Path(path) / client}")
 
-    @staticmethod
-    def _on_error(e):
-        """内部方法：_on_error。"""
-        Logger().error(e.message, popup=True)
+    @Slot(object)
+    def _on_error(self, e):
+        """处理后台任务错误事件。"""
+        Logger().error(str(e), popup=True)
 
     def scan_accounts(self, base_path: str):
-        """执行账户路径扫描，将新发现的账户导入模型。"""
+        """扫描指定路径下的所有 Telegram 账户。"""
         if not base_path or not Path(base_path).exists():
             alert("请输入有效的 Telegram 客户端路径", "警告", "warning")
             return None
 
-        # 首次扫描需用户明确同意数据解密
         if not self.window.current_configs.get("agreed_to_decrypt", False):
             if not confirm("这是您第一次使用寻找多账号功能。\n使用该功能需要解密该目录下的本地账户数据，您同意继续吗？",
                            "解密确认"):
@@ -105,10 +104,10 @@ class SettingsController:
 
 
 class SettingsWindow(QMainWindow):
-    """设置窗口主界面。"""
+    """设置主窗口类。"""
 
     def __init__(self, version):
-        """初始化。"""
+        """初始化设置主窗口。"""
         super().__init__()
         self.ui = Ui_setting()
         self.ui.setupUi(self)
@@ -133,10 +132,10 @@ class SettingsWindow(QMainWindow):
         self._connect_signals()
 
     def _connect_signals(self):
-        """设置信号与槽的连接。"""
+        """绑定信号槽函数。"""
         self.ui.client_edit.textChanged.connect(lambda t: self.update_current_config('client', t))
         self.ui.path_edit.textChanged.connect(lambda t: self.update_current_config('path', t))
-        self.ui.search_client_button.clicked.connect(self.controller.search_client_async)
+        self.ui.search_client_button.clicked.connect(self.controller.search_client_in_background)
         self.ui.tags_widget.itemDoubleClicked.connect(self.edit_item_event)
         self.ui.search_account_button.clicked.connect(self.scan_account_event)
         self.ui.del_button.clicked.connect(self.remove_item_event)
@@ -147,7 +146,7 @@ class SettingsWindow(QMainWindow):
             self.ui.cancel_button.clicked.connect(self.close)
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        """窗口关闭前确认未保存的配置变更。"""
+        """窗口关闭前的处理逻辑。"""
         if self.config.configs != self.current_configs:
             if confirm("配置已更改但未保存，你确定要退出程序吗？", "Tips"):
                 event.accept()
@@ -155,7 +154,7 @@ class SettingsWindow(QMainWindow):
                 event.ignore()
 
     def show_context_menu(self, pos: QPoint):
-        """显示账户列表上下文菜单。"""
+        """在账户列表右键时弹出上下文菜单。"""
         item = self.ui.tags_widget.itemAt(pos)
         menu = QMenu()
         add_action = menu.addAction("添加账户")
@@ -170,12 +169,12 @@ class SettingsWindow(QMainWindow):
             )
 
     def update_current_config(self, key, value):
-        """临时更新配置副本。"""
+        """更新临时配置。"""
         self.current_configs[key] = value
 
     @Slot()
     def save_config_event(self):
-        """持久化当前配置到配置文件。"""
+        """保存配置事件槽函数。"""
         try:
             self.config.batch_update(self.current_configs)
             Logger().info('配置保存成功')
@@ -185,14 +184,14 @@ class SettingsWindow(QMainWindow):
 
     @Slot()
     def add_item_event(self):
-        """触发添加账户对话框。"""
+        """新增账户事件槽函数。"""
         dialog = EditLabelDialog("", "", "", "", "", "", self)
         if dialog.exec() == QDialog.Accepted:
             self._handle_edit_dialog_result(None, dialog)
 
     @Slot()
     def edit_item_event(self, item):
-        """触发编辑账户对话框。"""
+        """编辑已存在账户项事件槽函数。"""
         data = item.data(Qt.UserRole)
         dialog = EditLabelDialog(
             data.get('id', ''), data.get('folder', ''), data.get('tag', ''),
@@ -203,12 +202,12 @@ class SettingsWindow(QMainWindow):
 
     @Slot()
     def scan_account_event(self):
-        """执行全盘账户扫描。"""
+        """扫描账户事件槽函数。"""
         self.controller.scan_accounts(self.ui.path_edit.text())
         self.current_configs['tags'] = self.config.get_all_accounts()
 
     def _handle_edit_dialog_result(self, item, dialog):
-        """同步编辑后的账户数据。"""
+        """分发标签编辑对话框完成的结果。"""
         SettingsDialogHelper.handle_edit_dialog_result(
             item,
             dialog,
@@ -223,14 +222,14 @@ class SettingsWindow(QMainWindow):
 
     @Slot()
     def remove_item_event(self):
-        """从模型中移除当前选中项。"""
+        """删除账户项事件槽函数。"""
         self.controller.model.remove_current(
             lambda: self.update_current_config('tags', self.config.get_all_accounts())
         )
 
     @Slot()
     def select_client_event(self):
-        """打开文件选择器以指定 Telegram 客户端位置。"""
+        """选择客户端文件事件槽函数。"""
         user_select, _ = QFileDialog.getOpenFileName(self, "选择客户端", "", "客户端主程序 (*.exe)")
         if user_select:
             client, path = os.path.basename(user_select), os.path.dirname(user_select)
@@ -241,7 +240,7 @@ class SettingsWindow(QMainWindow):
 
     @Slot()
     def select_path_event(self):
-        """打开路径浏览对话框。"""
+        """选择路径目录事件槽函数。"""
         user_select = DialogFactory.browse_folder(self, "选择路径")
         if user_select:
             self.ui.path_edit.setText(user_select)

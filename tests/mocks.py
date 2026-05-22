@@ -1,16 +1,13 @@
-"""
-测试用 Mock 实现。
-
-这些类用于在单元测试和集成测试中替代外部副作用组件，并记录关键调用以便断言。
-"""
+"""测试模拟对象。"""
 from pathlib import Path
-from typing import Dict, Any, List, Callable
+from typing import Dict, List
 
 
 class MockAccountRecoveryService:
     """记录账户恢复服务调用，并允许测试控制恢复结果。"""
 
     def __init__(self, logger=None):
+        """初始化模拟账户恢复服务。"""
         self.logger = logger
         self.cleanup_called = False
         self.cleanup_base_path = None
@@ -40,6 +37,7 @@ class MockAccountMonitor:
     """替代 AccountMonitor，避免测试启动真实后台监控。"""
 
     def __init__(self, tag: str, check_tag: str, config, logger, spawn_time=None):
+        """初始化模拟账户监控器。"""
         self.tag = tag
         self.check_tag = check_tag
         self.config = config
@@ -63,54 +61,11 @@ class MockAccountMonitor:
         self.process_exited = True
 
 
-class MockEventBus:
-    """内存事件总线替身，用于验证事件发布与订阅行为。"""
-
-    def __init__(self):
-        self._subscribers: Dict[str, List[Callable]] = {}
-        self._published_events: List[Any] = []
-
-    def subscribe(self, event_type: str, handler: Callable) -> None:
-        """注册事件处理器。"""
-        if event_type not in self._subscribers:
-            self._subscribers[event_type] = []
-        self._subscribers[event_type].append(handler)
-
-    def unsubscribe(self, event_type: str, handler: Callable) -> None:
-        """移除事件处理器，未注册时保持幂等。"""
-        if event_type in self._subscribers:
-            try:
-                self._subscribers[event_type].remove(handler)
-            except ValueError:
-                pass
-
-    def publish(self, event) -> None:
-        """记录事件并同步通知当前订阅者。"""
-        self._published_events.append(event)
-
-        if event.type in self._subscribers:
-            for handler in self._subscribers[event.type]:
-                try:
-                    handler(event.payload)
-                except Exception:
-                    pass
-
-    def clear(self) -> None:
-        """清空订阅和已发布事件记录。"""
-        self._subscribers.clear()
-        self._published_events.clear()
-
-    def get_published_events(self, event_type: str = None) -> List[Any]:
-        """返回已发布事件，可按事件类型过滤。"""
-        if event_type is None:
-            return list(self._published_events)
-        return [e for e in self._published_events if e.type == event_type]
-
-
 class MockFileSystem:
     """轻量级内存文件系统，供需要文件语义但不应触碰磁盘的测试使用。"""
 
     def __init__(self):
+        """初始化模拟文件系统。"""
         self._files: Dict[str, bytes] = {}
         self._dirs: set = {"/"}
 

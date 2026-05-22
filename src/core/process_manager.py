@@ -1,17 +1,13 @@
 """
-Telegram 客户端进程管理。
-
-封装了进程的启动、终止和监控逻辑。使用后台线程进行低功耗监控，
-并支持进程状态的全局事件通知。
+进程管理。
 """
 import atexit
 import subprocess
 import threading
+import weakref
 from contextlib import suppress, contextmanager
 from pathlib import Path
 from typing import Generator, Optional, Callable
-
-import psutil
 
 from src.core.config import ConfigService
 from src.core.exceptions import TASException
@@ -19,37 +15,30 @@ from src.core.logger import Logger
 from src.core.process_service import PsutilProcessService
 from src.core.runtime import delay
 
-# 内部标志：决定在主程序退出时是否需要清理通过 Popen 启动的子进程
 _should_reap: bool = True
+_active_managers = weakref.WeakSet()
 
 
 def _set_should_reap(value: bool) -> None:
-    """内部测试或特殊场景下禁用自动资源回收。"""
+    """设置是否释放句柄。"""
     global _should_reap
     _should_reap = value
 
 
 class ProcessManager:
-    """
-    进程控制器。
-
-    协调 Telegram 的生命周期，支持优雅关闭、强制清理以及启动后的就绪检测。
-    """
+    """进程管理器。"""
 
     def __init__(self, process_service: Optional[PsutilProcessService] = None, config: Optional[ConfigService] = None,
                  logger: Optional[Logger] = None):
-        """
-        初始化管理器。
-
-        可以通过注入 process_service 来改变底层的进程操作实现（如单元测试中的 Mock）。
-        """
+        """初始化进程管理器。"""
         self._popen_ref: Optional[subprocess.Popen] = None
         self._process_service = process_service or PsutilProcessService()
         self._config = config or ConfigService()
         self._logger = logger or Logger()
+        _active_managers.add(self)
 
     def _reap_popen(self) -> None:
-        """调用 poll() 回收子进程，防止父进程退出前产生僵尸进程。"""
+        """释放子进程资源。"""
         if not _should_reap:
             return
         if self._popen_ref is not None:
@@ -59,11 +48,7 @@ class ProcessManager:
 
     @contextmanager
     def kill_and_guard(self, client_name: str, restart_on_exit: bool = False) -> Generator[None, None, None]:
-        """
-        进程安全防护上下文。
-
-        进入时确保清理掉现有的 Telegram 进程，常用于文件交换等需要独占访问的场景。
-        """
+        """关闭并防护进程。"""
         self.kill_process(client_name)
         try:
             yield
@@ -72,11 +57,7 @@ class ProcessManager:
                 self.start_process(wait=False)
 
     def start_process(self, wait: bool = True) -> bool:
-        """
-        启动 Telegram。
-
-        wait=True 时会阻塞轮询，直到检测到进程已运行或达到 15s 超时。
-        """
+        """启动客户端进程。"""
         try:
             full_path = Path(self._config.path) / self._config.client
 
@@ -86,11 +67,10 @@ class ProcessManager:
 
             self._reap_popen()
 
-            # 仅启动不等待，用于退出时的快速重启
             if not wait:
                 self._logger.debug(f"启动进程: {full_path}")
                 proc = subprocess.Popen(
-                    args=str(full_path),
+                    args=[str(full_path)],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     stdin=subprocess.DEVNULL,
@@ -100,10 +80,9 @@ class ProcessManager:
                 self._popen_ref = proc
                 return True
 
-            # 阻塞启动：需要等待进程真正运行起来
             self._logger.debug(f"启动并等待就绪: {full_path}")
             proc = subprocess.Popen(
-                args=str(full_path),
+                args=[str(full_path)],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 stdin=subprocess.DEVNULL,
@@ -137,12 +116,7 @@ class ProcessManager:
             return False
 
     def kill_process(self, client: str):
-        """
-        清理 Telegram 进程。
-
-        逻辑：先尝试 SIGTERM (terminate)，如果没用再调用 kill。
-        如果清理后进程依然存在，则认为权限不足，抛出异常阻断后续操作。
-        """
+        """杀死指定客户端进程。"""
         self._reap_popen()
 
         if not isinstance(client, str):
@@ -156,21 +130,17 @@ class ProcessManager:
 
         self._logger.debug(f"正在清理 {len(processes_to_kill)} 个 {client} 进程...")
 
-        # 1. 尝试优雅退出
         for proc_info in processes_to_kill:
             if self._process_service.terminate(proc_info.pid):
                 killed = True
 
-        # 给系统一点处理信号的时间
         delay(0.1)
 
-        # 2. 检查残留并强制结束
         remaining = self._process_service.find_processes(client)
         for proc_info in remaining:
             if self._process_service.kill(proc_info.pid):
                 killed = True
 
-        # 3. 最终校验：如果清理后还能查到进程，说明权限不够或者进程卡死
         if self._process_service.find_processes(client):
             raise TASException(f"权限不足，无法终止进程: {client}。请手动关闭或以管理员身份运行。")
 
@@ -178,11 +148,7 @@ class ProcessManager:
 
 
 class ProcessMonitor:
-    """
-    高效的进程监视器。
-
-    核心逻辑是在独立线程中轮询及等待进程状态变更。
-    """
+    """进程状态监视器。"""
 
     def __init__(
             self,
@@ -193,7 +159,7 @@ class ProcessMonitor:
             logger: Optional[Logger] = None,
             process_service: Optional[PsutilProcessService] = None,
     ):
-        """初始化。"""
+        """初始化进程监视器。"""
         self.process_name = process_name
         self.check_interval = check_interval
         self._watch_thread = None
@@ -204,18 +170,29 @@ class ProcessMonitor:
         self._test_mode = test_mode
         self._callbacks: list[Callable[[bool, Optional[int]], None]] = []
 
+    @contextmanager
+    def watch(self, callback: Callable[[bool, Optional[int]], None]):
+        """管理监控生命周期。"""
+        self.register_callback(callback)
+        self.start_watching()
+        try:
+            yield self
+        finally:
+            self.unregister_callback(callback)
+            self.stop_watching()
+
     def register_callback(self, callback: Callable[[bool, Optional[int]], None]) -> None:
-        """注册状态变更回调。"""
+        """注册状态变化回调。"""
         if callback not in self._callbacks:
             self._callbacks.append(callback)
 
     def unregister_callback(self, callback: Callable[[bool, Optional[int]], None]) -> None:
-        """移除状态变更回调。"""
+        """注销状态变化回调。"""
         if callback in self._callbacks:
             self._callbacks.remove(callback)
 
     def start_watching(self):
-        """进入后台监视循环。"""
+        """启动进程监控。"""
         if self._watch_thread and self._watch_thread.is_alive():
             raise RuntimeError("进程监视器已启动")
 
@@ -224,13 +201,13 @@ class ProcessMonitor:
         self._watch_thread.start()
 
     def stop_watching(self):
-        """取消监视任务并等待结束。"""
+        """停止进程监控。"""
         self._stop_event.set()
         if self._watch_thread and self._watch_thread.is_alive():
             self._watch_thread.join(timeout=2.0)
 
     def _watch(self):
-        """主监控循环，状态变化时触发回调。"""
+        """运行监控循环。"""
         last_status = None
 
         while not self._stop_event.is_set():
@@ -250,9 +227,7 @@ class ProcessMonitor:
                 self._stop_event.wait(5.0)
 
     def _wait_for_process_change(self, last_status: bool) -> bool:
-        """
-        阻塞等待状态变更的核心方法。
-        """
+        """检测进程状态改变。"""
         if last_status and self.last_PID:
             is_dead = self._process_service.wait_for_process(self.last_PID, timeout=1.0)
             if is_dead:
@@ -271,10 +246,10 @@ class ProcessMonitor:
 
 
 def _atexit_cleanup():
-    """注册 atexit 钩子，确保程序退出时清理可能残留的子进程引用。"""
+    """执行退出清理。"""
     if _should_reap:
-        from src.core.process_manager import ProcessManager
-        ProcessManager()._reap_popen()
+        for manager in list(_active_managers):
+            manager._reap_popen()
 
 
 atexit.register(_atexit_cleanup)

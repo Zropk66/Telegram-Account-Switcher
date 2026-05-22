@@ -1,17 +1,13 @@
-"""
-ProcessManager 进程管理单元测试。
+"""进程管理单元测试。"""
 
-验证 Telegram 进程生命周期管理功能，涵盖启动、终止及进程冲突处理逻辑。
-"""
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
-from unittest.mock import MagicMock, patch, call
-from pathlib import Path
-from threading import Event
 
-from src.core.process_manager import ProcessManager
+from src.core import ProcessInfo
 from src.core.exceptions import TASException
-from src.core.event_bus import get_event_bus, ProcessStatusChanged, PROCESS_STATUS_CHANGED
+from src.core.process_manager import ProcessManager
 
 
 class TestProcessManager:
@@ -26,33 +22,15 @@ class TestProcessManager:
         with patch.object(Path, 'exists', return_value=True):
             mock_popen = MagicMock()
             with patch('subprocess.Popen', return_value=mock_popen) as mock_popen_call:
-                event_bus = get_event_bus()
-                saved_callback = None
+                with patch.object(pm._process_service, 'find_processes', side_effect=[
+                    [],
+                    [ProcessInfo(pid=1234, name="Telegram.exe")]
+                ]) as mock_find:
+                    result = pm.start_process(wait=True)
 
-                def mock_subscribe(event_type, handler):
-                    nonlocal saved_callback
-                    if event_type == PROCESS_STATUS_CHANGED:
-                        saved_callback = handler
-
-                with patch.object(event_bus, 'subscribe', side_effect=mock_subscribe):
-                    with patch.object(event_bus, 'unsubscribe') as mock_unsubscribe:
-                        def trigger_event():
-                            import time
-                            time.sleep(0.01)
-                            if saved_callback:
-                                saved_callback(ProcessStatusChanged(is_alive=True, pid=1234))
-
-                        import threading
-                        trigger_thread = threading.Thread(target=trigger_event)
-                        trigger_thread.start()
-
-                        result = pm.start_process(wait=True)
-
-                        trigger_thread.join(timeout=1)
-
-                        assert result is True
-                        mock_popen_call.assert_called_once()
-                        mock_unsubscribe.assert_called_once()
+                    assert result is True
+                    mock_popen_call.assert_called_once()
+                    assert mock_find.call_count == 2
 
     def test_start_process_not_found(self, mock_config):
         """验证目标可执行文件路径不存在时，正确拒绝启动。"""
@@ -73,7 +51,7 @@ class TestProcessManager:
 
         with patch.object(mock_service, 'terminate', side_effect=[True, False]) as mock_term:
             with patch.object(mock_service, 'kill', return_value=True) as mock_kill:
-                from src.core.interfaces import ProcessInfo
+                from src.core import ProcessInfo
                 with patch.object(mock_service, 'find_processes', side_effect=[
                     [ProcessInfo(101, 'Telegram.exe'), ProcessInfo(102, 'Telegram.exe')],
                     [ProcessInfo(102, 'Telegram.exe')],
@@ -88,7 +66,6 @@ class TestProcessManager:
     def test_kill_process_access_denied(self):
         """验证因权限不足导致清理失败时，抛出预期异常。"""
         from src.core.process_service import MockProcessService
-        from src.core.interfaces import ProcessInfo
 
         mock_service = MockProcessService()
         pm = ProcessManager(process_service=mock_service)

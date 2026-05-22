@@ -1,15 +1,10 @@
-"""
-ConfigStorage 配置存储单元测试。
-
-验证配置文件加载、损坏回退、原子写入和字段过滤。
-"""
+"""配置存储单元测试。"""
 import json
 from unittest.mock import patch
 
 import pytest
 
 from src.core.config.storage import ConfigStorage
-
 
 DEFAULT_CONFIG = {
     "client": "Telegram.exe",
@@ -56,15 +51,22 @@ def test_load_corrupted_json_fallback(temp_config_path, storage):
     assert config == DEFAULT_CONFIG
 
 
-def test_atomic_write_tmp_then_replace(temp_config_path, storage):
-    """验证保存配置时使用临时文件加原子替换策略。"""
+def test_safe_write_tmp_then_replace(temp_config_path, storage):
+    """验证保存配置时使用临时文件加替换策略。"""
     test_config = {**DEFAULT_CONFIG, "client": "TelegramTest.exe"}
 
     with patch("os.replace") as mock_replace:
         storage.save(test_config)
 
-        temp_file = temp_config_path.with_suffix(".tmp")
-        mock_replace.assert_called_once_with(temp_file, temp_config_path)
+        assert mock_replace.call_count == 1
+        called_args = mock_replace.call_args[0]
+        actual_temp_file = called_args[0]
+        actual_config_path = called_args[1]
+
+        assert actual_config_path == temp_config_path
+        assert actual_temp_file.parent == temp_config_path.parent
+        assert actual_temp_file.name.startswith("configs-")
+        assert actual_temp_file.name.endswith(".json.tmp")
 
     storage.save(test_config)
     with open(temp_config_path, "r", encoding="utf-8") as f:

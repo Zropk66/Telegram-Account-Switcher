@@ -1,7 +1,5 @@
 """
 Telegram 账户切换器主入口。
-
-负责初始化全局依赖、处理命令行入口、启动进程监控，并驱动一次账户切换流程。
 """
 import signal
 import sys
@@ -15,39 +13,41 @@ from src.core import (
     recovery,
     Logger,
 )
-from src.core.cli_controller import CLIController
+from src.core.cli_controller import CLIController, CLIAction
 from src.core.config import (
     ConfigService,
     ConfigData,
 )
 from src.core.config.key_manager import TelegramKeyManager
+from src.core.constants import APP_TITLE, APP_VERSION
 from src.core.logger import set_popup_handler, set_config_provider
 from src.core.single_instance import SingleInstanceLock, SingleInstanceException
-from src.ui.adapters import create_cli_callbacks, create_popup_handler
+from src.ui.adapters import create_popup_handler
 from src.ui.popup import Popup
-from src.ui.settings_ui import open_settings_window
 
 logger: Logger
 CONFIG: ConfigService
 
-TITLE = "TAS"
-VERSION = "2.0.0"
+TITLE = APP_TITLE
+VERSION = APP_VERSION
 
 
 def setup_dependency_injection():
-    """把配置和日志回调注入到仍需全局访问的服务中。"""
+    """配置依赖注入。"""
     global logger
 
     config_provider = ConfigData.as_provider()
     set_config_provider(config_provider)
 
     def config_log_handler(message: str) -> None:
+        """记录配置日志。"""
         if logger:
             logger.error(message)
 
     ConfigService.set_log_handler(config_log_handler)
 
     def key_manager_log_handler(message: str) -> None:
+        """记录密钥管理器日志。"""
         if logger:
             logger.error(message)
 
@@ -55,39 +55,26 @@ def setup_dependency_injection():
 
 
 def create_logger_with_popup() -> Logger:
-    """创建日志器。"""
+    """创建带弹窗的日志记录器。"""
     new_logger = Logger()
     popup_handler = create_popup_handler()
     set_popup_handler(popup_handler)
     return new_logger
 
 
-def create_cli_controller(version: str) -> CLIController:
-    """构建命令行控制器。"""
-    callbacks = create_cli_callbacks()
-    return CLIController(
-        version=version,
-        help_handler=callbacks["help_handler"],
-        settings_handler=callbacks["settings_handler"],
-        info_handler=callbacks["info_handler"],
-        warning_handler=callbacks["warning_handler"],
-        error_handler=callbacks["error_handler"],
-    )
-
-
 class TASApp:
-    """管理一次应用运行周期，从参数解析到切换完成事件。"""
+    """账户切换应用程序。"""
 
     def __init__(self, version: str):
+        """初始化应用程序。"""
         from PySide6.QtWidgets import QApplication
         self.version = version
         self.monitor = None
         self.app = QApplication.instance() or QApplication(sys.argv)
         self.ui_controller = Popup.instance()
-        self.cli_controller = create_cli_controller(version)
+        self.cli_controller = CLIController(version=version)
 
     def __enter__(self):
-        """注册退出保护，确保异常和中断都会走统一清理路径。"""
         global _cleanup_done
         _cleanup_done.clear()
         register_signal_handlers()
@@ -95,14 +82,12 @@ class TASApp:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """退出时关闭监控并释放单实例锁。"""
         if self.monitor:
             self.monitor.stop_watching()
-        SingleInstanceLock.cleanup()
         log_and_exit(mark=True)
 
     def run(self):
-        """执行 CLI 分支或账户切换主流程，并返回进程退出码。"""
+        """运行应用程序。"""
         try:
             args = self.cli_controller.parse_args()
         except (SystemExit, KeyboardInterrupt):
@@ -114,16 +99,28 @@ class TASApp:
 
         config_file = Path(CONFIG.config_file)
         if not config_file.exists() or not self.cli_controller.check_config(args):
+            from src.ui.settings_ui import open_settings_window
             open_settings_window(self.version)
             return 0
 
-        if self.cli_controller.handle_actions(args):
+        action = self.cli_controller.handle_actions(args)
+
+        if action == CLIAction.SHOW_HELP:
+            from src.ui.help_ui import open_help_window
+            open_help_window(self.version)
+            return 0
+        elif action == CLIAction.SHOW_SETTINGS:
+            from src.ui.settings_ui import open_settings_window
+            open_settings_window(self.version)
+            return 0
+        elif action == CLIAction.EXIT:
             return 0
 
         logger.info(f"切换账户: {CONFIG.tag or CONFIG.default}")
         logger.debug(f"Telegram路径: {CONFIG.path}")
 
         def wrapped_confirm(msg):
+            """确认切换账户。"""
             with Popup.context():
                 return Popup.confirm(msg, "账户切换确认")
 
@@ -137,15 +134,9 @@ class TASApp:
         if account_monitor:
             logger.debug("账户切换成功，开始后台监控")
             self.monitor = ProcessMonitor(CONFIG.client, logger=logger)
-            self.monitor.register_callback(account_monitor.handle_process_status)
-            self.monitor.start_watching()
-            try:
-                # Main thread blocks here until monitoring is done
+            with self.monitor.watch(account_monitor.handle_process_status):
                 account_monitor.run()
-            finally:
-                self.monitor.unregister_callback(account_monitor.handle_process_status)
-                self.monitor.stop_watching()
-            
+
         return 0
 
 
@@ -153,7 +144,7 @@ _cleanup_done = threading.Event()
 
 
 def log_and_exit(mark=False):
-    """退出前执行一次性清理，避免重复恢复默认账户。"""
+    """记录日志并退出。"""
     global _cleanup_done, CONFIG
     if mark and _cleanup_done.is_set():
         return None
@@ -170,9 +161,10 @@ def log_and_exit(mark=False):
 
 
 def register_signal_handlers():
-    """把 Ctrl+C 接入统一清理流程。"""
+    """注册信号处理器。"""
 
     def handle_interrupt(signum, frame):
+        """处理中断信号。"""
         log_and_exit(True)
         sys.exit(0)
 
@@ -180,7 +172,7 @@ def register_signal_handlers():
 
 
 def handle_global_exception(exc_type, exc_value, exc_traceback):
-    """记录未处理异常，并在可能时通过弹窗提示用户。"""
+    """处理全局异常。"""
     if exc_type in (KeyboardInterrupt, SystemExit):
         sys.exit(0)
     if logger:
@@ -192,27 +184,26 @@ def handle_global_exception(exc_type, exc_value, exc_traceback):
 
 
 def main():
-    """应用程序入口。"""
+    """程序主入口。"""
     try:
-        SingleInstanceLock.ensure_single_instance()
+        with SingleInstanceLock.ensure_single_instance():
+            global logger, CONFIG
+
+            setup_dependency_injection()
+            logger = create_logger_with_popup()
+            CONFIG = ConfigService()
+
+            logger.info(f"初始化成功")
+
+            try:
+                with TASApp(VERSION) as app:
+                    return app.run()
+            except KeyboardInterrupt:
+                return 0
+            except Exception as e:
+                logger.exception("程序异常终止", e)
+                return 1
     except SingleInstanceException as e:
         with Popup.context():
-            Popup.alert(e.message, "客户端重复启动")
-        return 1
-
-    global logger, CONFIG
-
-    setup_dependency_injection()
-    logger = create_logger_with_popup()
-    CONFIG = ConfigService()
-
-    logger.info(f"初始化成功")
-
-    try:
-        with TASApp(VERSION) as app:
-            return app.run()
-    except KeyboardInterrupt:
-        return 0
-    except Exception as e:
-        logger.exception("程序异常终止", e)
+            Popup.alert(str(e), "客户端重复启动")
         return 1

@@ -1,5 +1,7 @@
 # Telegram 账户切换器 (TAS)
 
+[English](README_EN.md) | 简体中文
+
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
 ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)
 ![Version](https://img.shields.io/badge/Latest-v2.0.0-brightgreen)
@@ -161,10 +163,6 @@ A: 使用 AES-256 加密，建议设置强密码。
 3. 提交更改 `git commit -m "feat: 添加新功能"`
 4. 推送分支 `git push origin feature/your-feature`
 5. 创建 Pull Request
-
-## 更新日志
-
-查看 [Changelog](CHANGELOG.md) 了解详细更新内容。
 
 ## 许可证
 

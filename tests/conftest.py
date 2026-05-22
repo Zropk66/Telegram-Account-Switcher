@@ -1,13 +1,9 @@
-"""
-pytest 共享配置与通用 fixture。
-
-每个测试都会自动重置全局单例和事件总线，避免用例之间共享状态。
-"""
+"""测试共享配置与 Fixture。"""
 import os
-import pytest
 from unittest.mock import MagicMock, patch
 
-# UI 测试在无显示器环境下运行
+import pytest
+
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 os.environ["QT_LOGGING_RULES"] = "*.debug=false"
 
@@ -18,7 +14,6 @@ def reset_singletons():
     from src.core.logger import Logger, reset_logger_state
     from src.core.config import ConfigService
     from src.ui.popup import Popup
-    from src.core.event_bus import EventBus, set_event_bus
     from src.core.process_manager import _set_should_reap
     from src.core.single_instance import SingleInstanceLock
 
@@ -27,9 +22,6 @@ def reset_singletons():
     ConfigService.reset_instance()
     Popup.reset_instance()
     SingleInstanceLock.cleanup()
-
-    test_bus = EventBus()
-    set_event_bus(test_bus)
 
     _set_should_reap(False)
 
@@ -40,13 +32,12 @@ def reset_singletons():
     ConfigService.reset_instance()
     Popup.reset_instance()
     SingleInstanceLock.cleanup()
-    set_event_bus(None)
     _set_should_reap(True)
 
 
 @pytest.fixture(autouse=True)
 def cleanup_temp_files():
-    """集中清理测试主动登记的临时文件或目录。"""
+    """清理测试临时文件。"""
     temp_files = []
 
     yield temp_files
@@ -64,10 +55,10 @@ def cleanup_temp_files():
 
 @pytest.fixture
 def mock_config():
-    """提供满足 IConfigProvider 协议的配置替身。"""
-    from src.core.interfaces import IConfigProvider
+    """提供满足 ConfigService 接口的配置替身。"""
+    from src.core.config import ConfigService
 
-    config = MagicMock(spec=IConfigProvider)
+    config = MagicMock(spec=ConfigService)
 
     config.client = "Telegram.exe"
     config.path = "/tmp/test_tas"
@@ -104,16 +95,16 @@ def mock_config():
 
 @pytest.fixture
 def mock_logger():
-    """提供满足 ILogger 协议的日志器替身。"""
-    from src.core.interfaces import ILogger
-    return MagicMock(spec=ILogger)
+    """提供满足 Logger 接口的日志器替身。"""
+    from src.core.logger import Logger
+    return MagicMock(spec=Logger)
 
 
 @pytest.fixture
 def mock_process_manager():
-    """提供满足 IProcessManager 协议的进程管理器替身。"""
-    from src.core.interfaces import IProcessManager
-    manager = MagicMock(spec=IProcessManager)
+    """提供满足 ProcessManager 接口的进程管理器替身。"""
+    from src.core.process_manager import ProcessManager
+    manager = MagicMock(spec=ProcessManager)
     manager.start_process.return_value = True
     manager.kill_process.return_value = True
 
@@ -121,6 +112,7 @@ def mock_process_manager():
 
     @contextmanager
     def mock_kill_and_guard(client_name, restart_on_exit=False):
+        """模拟守护进程上下文。"""
         yield
 
     manager.kill_and_guard = mock_kill_and_guard

@@ -1,9 +1,4 @@
-"""
-命令行帮助窗口。
-
-以表格形式展示所有可用命令行参数。
-"""
-
+"""命令行帮助窗口。"""
 import sys
 
 from PySide6.QtCore import Slot
@@ -13,7 +8,7 @@ from src.ui.ui_help import Ui_help
 
 
 def open_help_window(version):
-    """创建帮助窗口并进入 Qt 事件循环。"""
+    """打开帮助窗口。"""
     app = QApplication.instance() or QApplication(sys.argv)
     widget = HelpWindow(version)
     widget.show()
@@ -21,10 +16,10 @@ def open_help_window(version):
 
 
 class HelpWindow(QWidget):
-    """展示命令行参数说明的帮助窗口。"""
+    """帮助窗口。"""
 
     def __init__(self, version):
-        """初始化。"""
+        """初始化窗口。"""
         super().__init__()
         self.version = version
         self.ui = Ui_help()
@@ -64,5 +59,5 @@ class HelpWindow(QWidget):
 
     @Slot()
     def double_click_event(self, event):
-        """调试表格双击事件。"""
+        """处理双击事件。"""
         print(f'{event.row()} 行, {event.column()} 列被双击了. 数据 -> "{event.data()}".')

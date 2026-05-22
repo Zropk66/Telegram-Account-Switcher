@@ -1,11 +1,5 @@
-"""
-AccountFileSystemService 与 AccountRecoveryService 单元测试。
-
-验证账户文件夹定位、原子化切换以及异常中断后的现场恢复逻辑。
-"""
-import pytest
+"""文件系统与恢复服务单元测试。"""
 from pathlib import Path
-from unittest.mock import MagicMock
 
 from src.core.account.account_services import (
     find_account_folder,
@@ -15,13 +9,12 @@ from src.core.account.account_services import (
 
 
 class TestAccountFileSystemService:
-    """验证账户文件系统服务的功能性与原子操作正确性。"""
+    """验证账户文件系统服务的功能性与安全操作正确性。"""
 
     def test_find_account_by_tag(self, tmp_path):
         """验证是否能通过解析 `tas_tag` 文件内容精准定位对应文件夹。"""
         base_dir = tmp_path
 
-        # 模拟账户文件夹结构
         account1_dir = base_dir / "tdata-account1"
         account1_dir.mkdir()
         (account1_dir / "tas_tag").write_text("account1", encoding="utf-8")
@@ -30,16 +23,14 @@ class TestAccountFileSystemService:
         account2_dir.mkdir()
         (account2_dir / "tas_tag").write_text("account2", encoding="utf-8")
 
-        # 验证查找逻辑
         assert find_account_folder(str(base_dir), "account1") == "tdata-account1"
         assert find_account_folder(str(base_dir), "account2") == "tdata-account2"
         assert find_account_folder(str(base_dir), "non_existent") is None
 
-    def test_swap_tdata_atomic(self, tmp_path):
-        """验证 `tdata` 与目标目录的原子交换操作能否安全完成。"""
+    def test_swap_tdata_safe(self, tmp_path):
+        """验证 `tdata` 与目标目录的交换操作能否安全完成。"""
         base_dir = tmp_path
 
-        # 准备初始环境
         tdata_dir = base_dir / "tdata"
         tdata_dir.mkdir()
         (tdata_dir / "tdata_file.txt").write_text("tdata content")
@@ -48,11 +39,9 @@ class TestAccountFileSystemService:
         target_dir.mkdir()
         (target_dir / "target_file.txt").write_text("target content")
 
-        # 执行切换
         temp_prefix = "tdata-temp123"
         result = swap_active_tdata_with_target(str(base_dir), "tdata-target", temp_prefix)
 
-        # 验证结果
         assert result is True
         new_tdata = base_dir / "tdata"
         assert new_tdata.is_dir()
@@ -60,7 +49,7 @@ class TestAccountFileSystemService:
         assert not target_dir.exists()
 
     def test_swap_same_folder_returns_true(self, tmp_path):
-        """验证当目标已经是活跃目录时，无需任何操作直接返回 True。"""
+        """验证目标已经是活跃目录时直接返回 True。"""
         base_dir = tmp_path
 
         tdata_dir = base_dir / "tdata"
@@ -73,7 +62,7 @@ class TestAccountFileSystemService:
         assert tdata_dir.exists()
 
     def test_swap_missing_tdata_returns_false(self, tmp_path):
-        """验证当原活跃目录不存在时，切换逻辑仍能将目标提升为 tdata。"""
+        """验证原活跃目录不存在时仍能将目标提升为 tdata。"""
         base_dir = tmp_path
 
         target_dir = base_dir / "tdata-target"
@@ -106,7 +95,6 @@ class TestAccountRecoveryService:
         base_dir = tmp_path
         recovery = AccountRecoveryService(mock_logger)
 
-        # 模拟异常中断：目录残留
         orphan_dir = base_dir / "tdata-abc123"
         orphan_dir.mkdir()
         (orphan_dir / "recovery_file.txt").write_text("recovery content")
@@ -115,7 +103,6 @@ class TestAccountRecoveryService:
 
         recovery.cleanup_orphan_folders(str(base_dir))
 
-        # 验证目录还原
         tdata_dir = base_dir / "tdata"
         assert tdata_dir.is_dir()
         assert (tdata_dir / "recovery_file.txt").exists()
@@ -137,7 +124,7 @@ class TestAccountRecoveryService:
         mock_logger.warning.assert_not_called()
 
     def test_cleanup_multiple_orphans_restores_first(self, tmp_path, mock_logger):
-        """验证当存在多个残留时，仅修复首个发现的条目。"""
+        """验证存在多个残留时仅修复首个发现的条目。"""
         base_dir = tmp_path
         recovery = AccountRecoveryService(mock_logger)
 

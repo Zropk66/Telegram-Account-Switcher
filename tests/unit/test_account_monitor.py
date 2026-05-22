@@ -1,36 +1,15 @@
-"""
-AccountMonitor 账户监控单元测试。
-
-验证 Telegram 账户监控器的核心功能，包括文件监听、线程同步和事件处理。
-"""
-import pytest
+"""账户监控单元测试。"""
 import threading
 import time
-from pathlib import Path
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock, patch, call
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from src.core.account.account_monitor import AccountMonitor, _ConfigsFileHandler
-from src.core.event_bus import (
-    Event,
-    ProcessStatusChanged,
-    AccountLoginDetected,
-    AppCompletionEvent,
-    get_event_bus,
-    PROCESS_STATUS_CHANGED,
-    ACCOUNT_LOGIN_DETECTED,
-    APP_COMPLETION,
-)
 
-
-# ═════════════════════════════════════════════════════════════════════════════
-# _ConfigsFileHandler 测试
-# ═════════════════════════════════════════════════════════════════════════════
 
 class TestConfigsFileHandler:
-    """
-    验证 watchdog 文件监听器的事件处理逻辑。
-    """
+    """验证文件监听器事件处理。"""
 
     def test_watchdog_triggers_login_flag(self, tmp_path):
         """验证文件修改时设置登录标志并唤醒线程。"""
@@ -168,7 +147,6 @@ class TestConfigsFileHandler:
 
         mock_event = MagicMock()
         mock_event.is_directory = False
-        # Windows下的非法路径字符
         mock_event.src_path = "\\\\invalid\\path\\<>:/\\|?*"
 
         handler.on_modified(mock_event)
@@ -176,14 +154,8 @@ class TestConfigsFileHandler:
         assert login_flag[0] is False
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# 线程同步测试
-# ═════════════════════════════════════════════════════════════════════════════
-
 class TestThreadSynchronization:
-    """
-    测试线程间的同步与协作机制。
-    """
+    """测试线程间的同步与协作机制。"""
 
     def test_wake_event_set_from_watchdog_thread(self, tmp_path, mock_config, mock_logger):
         """验证文件监控线程能正确唤醒主循环线程。"""
@@ -203,7 +175,7 @@ class TestThreadSynchronization:
         wait_result = []
 
         def simulate_monitor_loop():
-            # 主循环线程阻塞等待唤醒
+            """模拟监控循环。"""
             wait_result.append(wake_event.wait(timeout=1.0))
 
         monitor_thread = threading.Thread(target=simulate_monitor_loop)
@@ -211,7 +183,6 @@ class TestThreadSynchronization:
 
         time.sleep(0.1)
 
-        # 模拟文件监控线程触发
         mock_event = MagicMock()
         mock_event.is_directory = False
         mock_event.src_path = str(configs_dir / "configs")
@@ -223,8 +194,8 @@ class TestThreadSynchronization:
         assert wait_result[0] is True
         assert login_flag[0] is True
 
-    def test_wake_event_set_from_eventbus_callback(self, tmp_path, mock_config, mock_logger):
-        """验证 EventBus 回调能正确唤醒主循环线程。"""
+    def test_wake_event_set_from_direct_callback(self, tmp_path, mock_config, mock_logger):
+        """验证直接调用 handle_process_status 能正确唤醒主循环线程。"""
         configs_dir = tmp_path / "tdata" / "D877F783D5D3EF8C"
         configs_dir.mkdir(parents=True)
         mock_config.path = str(tmp_path)
@@ -241,6 +212,7 @@ class TestThreadSynchronization:
             wait_result = []
 
             def simulate_monitor_loop():
+                """模拟监控循环。"""
                 wait_result.append(monitor._wake_event.wait(timeout=1.0))
 
             monitor_thread = threading.Thread(target=simulate_monitor_loop)
@@ -248,14 +220,7 @@ class TestThreadSynchronization:
 
             time.sleep(0.1)
 
-            # 模拟 EventBus 在其他线程触发状态变更
-            def simulate_eventbus_callback():
-                monitor._process_alive = False
-                monitor._wake_event.set()
-
-            callback_thread = threading.Thread(target=simulate_eventbus_callback)
-            callback_thread.start()
-            callback_thread.join()
+            monitor.handle_process_status(is_alive=False)
 
             monitor_thread.join(timeout=2.0)
 
@@ -298,6 +263,7 @@ class TestThreadSynchronization:
         results = []
 
         def modify_flag():
+            """修改登录标志。"""
             mock_event = MagicMock()
             mock_event.is_directory = False
             mock_event.src_path = str(target_file)
@@ -314,14 +280,8 @@ class TestThreadSynchronization:
         assert login_flag[0] is True
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# AccountMonitor 逻辑测试
-# ═════════════════════════════════════════════════════════════════════════════
-
 class TestAccountMonitor:
-    """
-    测试账户监控器的核心业务逻辑。
-    """
+    """测试账户监控器的核心业务逻辑。"""
 
     def test_check_mtime_after_file_change(self, tmp_path, mock_config, mock_logger):
         """验证文件修改时间更新后，监控器能识别到最新变更。"""
@@ -333,7 +293,6 @@ class TestAccountMonitor:
         mock_config.path = str(tmp_path)
         spawn_time = datetime.now() - timedelta(seconds=10)
 
-        # 将文件最后修改时间设置为 spawn_time 之后，表明发生过修改
         import os
         file_mtime = spawn_time.timestamp() + 5
         os.utime(str(configs_file), (file_mtime, file_mtime))
@@ -378,9 +337,8 @@ class TestAccountMonitor:
         mock_config.start_time = datetime.now()
 
         with patch('src.core.account.account_monitor.Observer'), \
-             patch('src.core.account.account_monitor.restore_default') as mock_restore, \
-             patch('src.core.account.account_monitor.psutil') as mock_psutil:
-
+                patch('src.core.account.account_monitor.restore_default') as mock_restore, \
+                patch('src.core.account.account_monitor.psutil') as mock_psutil:
             mock_process = MagicMock()
             mock_process.info = {'name': mock_config.client}
             mock_psutil.process_iter.return_value = [mock_process]
@@ -396,7 +354,6 @@ class TestAccountMonitor:
             monitor._process_alive = False
             monitor._login_detected = [True]
 
-            # 模拟业务运行循环中恢复默认账户的判定逻辑
             if monitor.tag and monitor.tag != monitor.config.default:
                 mock_restore()
 
@@ -425,17 +382,16 @@ class TestAccountMonitor:
             mock_observer.stop.assert_called_once()
             mock_observer.join.assert_called_once_with(timeout=2)
 
-    def test_completion_event_published(self, tmp_path, mock_config, mock_logger):
-        """验证任务完成后能发布 AppCompletionEvent 事件。"""
-        event_bus = get_event_bus()
+    def test_completion_event_and_callback(self, tmp_path, mock_config, mock_logger):
+        """验证任务完成后能正确触发 completion_event 和回调。"""
         captured = []
 
-        def capture_event(payload):
-            captured.append(payload)
+        def capture_callback(success, message):
+            """捕获回调结果。"""
+            captured.append((success, message))
 
-        event_bus.subscribe(APP_COMPLETION, capture_event)
-
-        with patch('src.core.account.account_monitor.Observer'):
+        with patch('src.core.account.account_monitor.Observer'), \
+                patch('src.core.account.account_monitor.psutil'):
             monitor = AccountMonitor(
                 tag="test_tag",
                 check_tag=None,
@@ -443,15 +399,15 @@ class TestAccountMonitor:
                 logger=mock_logger,
                 spawn_time=datetime.now()
             )
+            monitor.register_on_completion(capture_callback)
 
-            event_bus.publish(Event(
-                APP_COMPLETION,
-                AppCompletionEvent(success=True, message="账户切换完成"),
-            ))
+            monitor._process_alive = False
+            monitor.run()
 
-            assert len(captured) > 0
-            assert isinstance(captured[0], AppCompletionEvent)
-            assert captured[0].success is True
+            assert monitor.completion_event.is_set()
+            assert len(captured) == 1
+            assert captured[0][0] is True
+            assert "正常结束" in captured[0][1]
 
     def test_key_sync_only_after_60_seconds(self, tmp_path, mock_config, mock_logger):
         """验证密钥备份策略：仅在登录状态维持超过 60 秒后同步。"""
@@ -460,7 +416,6 @@ class TestAccountMonitor:
 
         mock_config.path = str(tmp_path)
         mock_config.default = "default_account"
-        # 已运行 70 秒
         mock_config.start_time = datetime.now() - timedelta(seconds=70)
 
         monitor = AccountMonitor(
@@ -472,7 +427,6 @@ class TestAccountMonitor:
         )
         monitor._login_detected = [True]
 
-        # 模拟同步判断逻辑
         if monitor.tag != monitor.config.default:
             running_time = datetime.now() - monitor.config.start_time
             if running_time.total_seconds() >= 60:
@@ -496,7 +450,6 @@ class TestAccountMonitor:
             logger=mock_logger,
             spawn_time=datetime.now() - timedelta(seconds=80)
         )
-        # 未登录
         is_logged_in = False
 
         if monitor.tag != monitor.config.default:
@@ -506,7 +459,7 @@ class TestAccountMonitor:
         mock_config.backup_account_keys.assert_not_called()
 
     def test_no_restore_if_same_as_default(self, tmp_path, mock_config, mock_logger):
-        """验证当账户为默认账户时，不触发额外的自动恢复逻辑。"""
+        """验证相同账户不触发额外自动恢复逻辑。"""
         mock_config.path = str(tmp_path)
         mock_config.default = "same_tag"
 
@@ -525,14 +478,8 @@ class TestAccountMonitor:
             mock_restore.assert_not_called()
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# AccountMonitor 集成测试
-# ═════════════════════════════════════════════════════════════════════════════
-
 class TestAccountMonitorIntegration:
-    """
-    测试 AccountMonitor 与系统组件的集成协作能力。
-    """
+    """测试 AccountMonitor 与系统组件的集成协作。"""
 
     def test_observer_started_with_correct_path(self, tmp_path, mock_config, mock_logger):
         """验证监控器正确初始化文件监听观察者。"""
@@ -550,7 +497,6 @@ class TestAccountMonitorIntegration:
                 spawn_time=datetime.now()
             )
 
-            # 模拟初始化过程
             handler = _ConfigsFileHandler(
                 monitor.configs_file,
                 monitor._wake_event,
@@ -566,56 +512,26 @@ class TestAccountMonitorIntegration:
             assert call_args[0][1] == str(configs_dir)
             mock_observer.start.assert_called_once()
 
-    def test_eventbus_subscription_on_run(self, tmp_path, mock_config, mock_logger):
-        """验证监控器运行时正确订阅了进程状态变更事件。"""
-        configs_dir = tmp_path / "tdata" / "D877F783D5D3EF8C"
-        configs_dir.mkdir(parents=True)
-        mock_config.path = str(tmp_path)
-
-        event_bus = get_event_bus()
-        captured_subs = []
-
-        original_subscribe = event_bus.subscribe
-
-        def tracking_subscribe(event_type, handler):
-            captured_subs.append(event_type)
-            return original_subscribe(event_type, handler)
-
-        with patch.object(event_bus, 'subscribe', side_effect=tracking_subscribe), \
-             patch('src.core.account.account_monitor.Observer'), \
-             patch('src.core.account.account_monitor.psutil'):
-
-            monitor = AccountMonitor(
-                tag="test_tag",
-                check_tag=None,
-                config_manage=mock_config,
-                logger=mock_logger,
-                spawn_time=datetime.now()
-            )
-
-            monitor._process_alive = False
-            monitor.run()
-
-            assert PROCESS_STATUS_CHANGED in captured_subs
-
-    def test_full_lifecycle_event_flow(self, tmp_path, mock_config, mock_logger):
-        """验证整个账户生命周期内的事件流转准确性。"""
+    def test_full_lifecycle_callback_flow(self, tmp_path, mock_config, mock_logger):
+        """验证整个账户生命周期内的回调触发准确性。"""
         configs_dir = tmp_path / "tdata" / "D877F783D5D3EF8C"
         configs_dir.mkdir(parents=True)
         mock_config.path = str(tmp_path)
         mock_config.default = "default_account"
 
-        captured_events = []
-        event_bus = get_event_bus()
+        captured_logins = []
+        captured_completions = []
 
-        def capture_event(payload):
-            captured_events.append(payload)
+        def on_login(tag):
+            """处理登录回调。"""
+            captured_logins.append(tag)
 
-        event_bus.subscribe(ACCOUNT_LOGIN_DETECTED, capture_event)
-        event_bus.subscribe(APP_COMPLETION, capture_event)
+        def on_completion(success, msg):
+            """处理完成回调。"""
+            captured_completions.append((success, msg))
 
         with patch('src.core.account.account_monitor.Observer'), \
-             patch('src.core.account.account_monitor.psutil'):
+                patch('src.core.account.account_monitor.psutil'):
             monitor = AccountMonitor(
                 tag="test_tag",
                 check_tag=None,
@@ -623,40 +539,28 @@ class TestAccountMonitorIntegration:
                 logger=mock_logger,
                 spawn_time=datetime.now()
             )
+            monitor.register_on_login(on_login)
+            monitor.register_on_completion(on_completion)
 
-            # 模拟用户登录
             monitor._login_detected[0] = True
-            event_bus.publish(Event(
-                ACCOUNT_LOGIN_DETECTED,
-                AccountLoginDetected(tag="test_tag")
-            ))
+            for cb in monitor._login_callbacks:
+                cb(monitor.tag or monitor.config.default)
 
-            # 模拟进程关闭
             monitor._process_alive = False
-            monitor._wake_event.set()
+            monitor.run()
 
-            # 模拟任务完成
-            event_bus.publish(Event(
-                APP_COMPLETION,
-                AppCompletionEvent(success=True, message="完成")
-            ))
+            assert len(captured_logins) == 1
+            assert captured_logins[0] == "test_tag"
+            assert len(captured_completions) == 1
+            assert captured_completions[0][0] is True
+            assert monitor.completion_event.is_set()
 
-            assert len(captured_events) >= 2
-            assert isinstance(captured_events[0], AccountLoginDetected)
-            assert isinstance(captured_events[1], AppCompletionEvent)
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# 边界情况测试
-# ═════════════════════════════════════════════════════════════════════════════
 
 class TestEdgeCases:
-    """
-    测试 AccountMonitor 的异常处理与健壮性。
-    """
+    """测试异常处理与健壮性。"""
 
     def test_configs_dir_not_exists(self, tmp_path, mock_config, mock_logger):
-        """验证当配置目录缺失时，服务应优雅跳过监听逻辑。"""
+        """验证配置目录缺失时优雅跳过监听。"""
         mock_config.path = str(tmp_path)
 
         with patch('src.core.account.account_monitor.Observer'):

@@ -1,9 +1,4 @@
-"""
-轻量配置访问层。
-
-该模块不依赖 ConfigService，直接通过 JSON 读取 configs.json。
-主要用于 Logger 等需要在核心服务初始化之前就读取环境配置（如日志是否输出到文件）的模块。
-"""
+"""只读配置文件访问器。"""
 
 import json
 from pathlib import Path
@@ -13,18 +8,18 @@ from .config import PathConfig
 
 
 class ConfigLoadError(Exception):
-    """当配置文件格式损坏或读取权限受限时抛出。"""
+    """配置文件加载异常。"""
     pass
 
 
 class ConfigData:
-    """静态工具类：直接访问物理配置文件。"""
+    """配置文件数据接口。"""
 
     _CONFIG_FILENAME = PathConfig.CONFIG_FILE
 
     @staticmethod
     def path() -> Path:
-        """配置文件在当前工作目录下的位置。"""
+        """获取配置文件路径。"""
         return Path.cwd() / ConfigData._CONFIG_FILENAME
 
     @staticmethod
@@ -73,8 +68,8 @@ class ConfigData:
 
 
 class _ConfigDataProvider:
-    """内部包装类，适配 Logger 模块的 ConfigProvider 契约。"""
+    """配置数据提供者。"""
     @staticmethod
     def get(key: str, default: Any = None) -> Any:
-        """get 方法。"""
+        """获取配置值。"""
         return ConfigData.read(key, default)

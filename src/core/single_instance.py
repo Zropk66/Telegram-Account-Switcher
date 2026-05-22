@@ -1,26 +1,25 @@
-"""
-跨进程单实例防护。
-
-使用 Windows Named Mutex 阻止 TAS 同时运行多个实例。
-"""
+"""单实例防护锁。"""
 import ctypes
+import threading
 from ctypes import wintypes
 from typing import Optional
 
+from src.core.constants import SINGLE_INSTANCE_LOCK_NAME, MUTEX_PREFIX
 from src.core.exceptions import SingleInstanceException
 
 _kernel32 = ctypes.windll.kernel32
 
 
 class SingleInstanceLock:
-    """基于 Global Windows Mutex 的单实例锁。"""
+    """单实例锁。"""
 
     _instance: Optional['SingleInstanceLock'] = None
+    _lock = threading.Lock()
 
-    def __init__(self, lock_name: str = "TelegramAccountSwitcher"):
-        """初始化。"""
+    def __init__(self, lock_name: str = SINGLE_INSTANCE_LOCK_NAME):
+        """初始化锁。"""
         self._lock_name = lock_name
-        self._mutex_name = f"Global\\{lock_name}"
+        self._mutex_name = f"{MUTEX_PREFIX}{lock_name}"
         self._handle: Optional[int] = None
         self._acquired = False
         self._init_windows()
@@ -36,7 +35,7 @@ class SingleInstanceLock:
             raise SingleInstanceException(f"创建互斥体失败，错误码: {ctypes.get_last_error()}")
 
     def acquire(self, timeout: float = 0) -> bool:
-        """尝试获取锁，已被其他实例持有时返回 False。"""
+        """尝试获取锁。"""
         if self._acquired:
             return True
 
@@ -60,23 +59,25 @@ class SingleInstanceLock:
             )
 
     def release(self) -> None:
-        """释放已持有的 Mutex。"""
+        """释放互斥锁。"""
         if self._acquired:
             _kernel32.ReleaseMutex(self._handle)
             self._acquired = False
 
     def close(self) -> None:
-        """释放锁并关闭系统句柄。"""
+        """关闭系统句柄。"""
         self.release()
         if self._handle:
             _kernel32.CloseHandle(self._handle)
             self._handle = None
 
     @classmethod
-    def ensure_single_instance(cls, lock_name: str = "TelegramAccountSwitcher") -> 'SingleInstanceLock':
-        """获取全局单实例锁，失败说明已有 TAS 实例正在运行。"""
+    def ensure_single_instance(cls, lock_name: str = SINGLE_INSTANCE_LOCK_NAME) -> 'SingleInstanceLock':
+        """获取全局单实例锁。"""
         if cls._instance is None:
-            cls._instance = cls(lock_name)
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = cls(lock_name)
 
         if not cls._instance.acquire(timeout=0):
             raise SingleInstanceException(
@@ -94,13 +95,13 @@ class SingleInstanceLock:
             cls._instance = None
 
     def __enter__(self):
-        """内部方法：__enter__。"""
+        """进入上下文管理器。"""
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """内部方法：__exit__。"""
+        """退出上下文管理器。"""
         self.close()
 
     def __del__(self):
-        """内部方法：__del__。"""
+        """析构对象并释放句柄。"""
         self.close()

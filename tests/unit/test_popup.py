@@ -1,13 +1,7 @@
-"""
-Popup 弹窗管理器单元测试。
-
-验证全局弹窗管理器的单例语义、提示类型映射和 Qt 应用上下文保障。
-"""
+"""弹窗管理器单元测试。"""
 import os
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-# 设置 offscreen 模式，避免单元测试依赖真实显示器环境
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 from PySide6.QtWidgets import QMessageBox, QApplication
@@ -31,6 +25,7 @@ class TestPopup:
         captured_icon = None
 
         def mock_setIcon(icon):
+            """模拟设置图标。"""
             nonlocal captured_icon
             captured_icon = icon
 

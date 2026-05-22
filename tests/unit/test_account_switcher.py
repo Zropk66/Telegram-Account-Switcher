@@ -1,10 +1,7 @@
-"""
-AccountSwitcher 单元测试。
-
-验证账户切换协调器的会话管理、默认账户快捷路径、目标账户切换和失败恢复行为。
-"""
-import pytest
+"""账户切换器单元测试。"""
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from src.core.account.account_switcher import AccountSwitcher
 
@@ -14,6 +11,7 @@ class TestAccountSwitcher:
 
     @pytest.fixture(autouse=True)
     def setup_mocks(self, mock_config, mock_logger, mock_process_manager):
+        """初始化测试模拟对象。"""
         with patch('src.core.account.account_switcher.ConfigService', return_value=mock_config), \
              patch('src.core.account.account_switcher.Logger', return_value=mock_logger), \
              patch('src.core.account.account_switcher.ProcessManager', return_value=mock_process_manager):
@@ -122,6 +120,7 @@ class TestAccountSwitcher:
 
         @contextmanager
         def mock_kill_and_guard(client_name, restart_on_exit=False):
+            """模拟守护进程。"""
             yield
 
         mock_process_manager.kill_and_guard = mock_kill_and_guard
@@ -150,3 +149,72 @@ class TestAccountSwitcher:
 
             assert result is False
             mock_recovery_service.recover_account.assert_not_called()
+
+    def test_process_exception_triggers_rollback(self, mock_config, mock_process_manager):
+        """验证 process 执行中发生异常时，确实触发了默认账户回滚并返回 False。"""
+        test_tag = "account1"
+        mock_config.tag = test_tag
+        mock_config.tags = {test_tag: {"id": "12345", "folder": "tdata-abc"}}
+        mock_config.default = "default_account"
+
+        switcher = AccountSwitcher()
+
+        with patch.object(switcher, '_process', side_effect=Exception("切换异常")), \
+             patch.object(switcher, '_rollback_to_default') as mock_rollback:
+            result = switcher.process()
+
+            assert result is False
+            mock_rollback.assert_called_once()
+
+    def test_rollback_to_default_no_backup(self, mock_config):
+        """验证未交换时回滚不备份并就地恢复默认账户。"""
+        mock_config.path = "/tmp/test_tas"
+        mock_config.default = "default_account"
+
+        switcher = AccountSwitcher()
+
+        from pathlib import Path
+        with patch('src.core.account.account_switcher.restore_default') as mock_restore_default, \
+             patch.object(Path, 'exists', return_value=False), \
+             patch.object(Path, 'rename') as mock_rename:
+
+            switcher._rollback_to_default(actual_default_folder="tdata-temp123")
+
+            mock_rename.assert_not_called()
+            mock_restore_default.assert_called_once_with(target_folder="tdata")
+
+    def test_rollback_to_default_none_folder(self, mock_config):
+        """验证缺失默认目录时直接以空目录调用恢复默认。"""
+        mock_config.path = "/tmp/test_tas"
+        mock_config.default = "default_account"
+
+        switcher = AccountSwitcher()
+
+        from pathlib import Path
+        with patch('src.core.account.account_switcher.restore_default') as mock_restore_default, \
+             patch.object(Path, 'exists', return_value=False), \
+             patch.object(Path, 'rename') as mock_rename:
+
+            switcher._rollback_to_default(actual_default_folder=None)
+
+            mock_rename.assert_not_called()
+            mock_restore_default.assert_called_once_with(target_folder=None)
+
+    def test_rollback_to_default_with_backup(self, mock_config):
+        """验证已交换时回滚先备份活跃目录再恢复默认。"""
+        mock_config.path = "/tmp/test_tas"
+        mock_config.default = "default_account"
+
+        switcher = AccountSwitcher()
+
+        from pathlib import Path
+        with patch('src.core.account.account_switcher.restore_default') as mock_restore_default, \
+             patch.object(Path, 'exists', return_value=True), \
+             patch.object(Path, 'rename') as mock_rename, \
+             patch('shutil.rmtree') as mock_rmtree:
+
+            switcher._rollback_to_default(actual_default_folder="tdata-temp123")
+
+            mock_rename.assert_called_once()
+            mock_restore_default.assert_called_once_with(target_folder="tdata-temp123")
+

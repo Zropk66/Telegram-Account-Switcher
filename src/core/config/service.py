@@ -1,11 +1,6 @@
-"""
-配置服务门面。
-
-本模块是系统的配置中心，协调 ConfigStorage (磁盘)、RuntimeState (内存)
-以及各功能模块的配置需求。它采用单例模式，对外提供统一的配置操作 API。
-"""
-
+"""配置服务。"""
 import os
+import threading
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
@@ -15,19 +10,17 @@ from src.core.config.data import ConfigData
 from src.core.config.key_manager import TelegramKeyManager
 from src.core.config.runtime import RuntimeState
 from src.core.config.storage import ConfigStorage
+from src.core.constants import TELEGRAM_EXE
 from src.core.utils import format_timedelta, search_file_in_dirs
 
 T = TypeVar('T')
 
 
 class ConfigService:
-    """
-    配置服务单例门面。
-    """
+    """配置服务。"""
 
-    # 基础默认值，作为 JSON 读取失败时的兜底
     _DEFAULT_CONFIG = {
-        "client": "Telegram.exe",
+        "client": TELEGRAM_EXE,
         "path": "",
         "default": "",
         "tags": {},
@@ -36,16 +29,19 @@ class ConfigService:
     }
 
     _instance = None
+    _lock = threading.Lock()
 
     def __new__(cls, *args, **kwargs):
-        """单例模式初始化。"""
+        """实现单例模式。"""
         if not cls._instance:
-            cls._instance = super().__new__(cls)
-            cls._instance.__initialized = False
+            with cls._lock:
+                if not cls._instance:
+                    cls._instance = super().__new__(cls)
+                    cls._instance.__initialized = False
         return cls._instance
 
     def __init__(self, _storage: Optional["ConfigStorage"] = None):
-        """初始化。"""
+        """初始化配置服务。"""
         if self.__initialized:
             return
 
@@ -60,14 +56,14 @@ class ConfigService:
         self.__initialized = True
 
     def __enter__(self):
-        """进入批量更新模式。"""
+        """开启批量配置更新事务。"""
         # noinspection PyProtectedMember
         self._storage._batch = True
         self._snapshot = deepcopy(self._config)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """退出批量更新模式：成功则落盘，异常则回滚。"""
+        """结束批量配置更新事务并保存变更。"""
         # noinspection PyProtectedMember
         self._storage._batch = False
         if exc_type is not None:
@@ -83,12 +79,12 @@ class ConfigService:
 
     @classmethod
     def get_instance(cls) -> "ConfigService":
-        """get_instance 方法。"""
+        """获取配置服务单例。"""
         return cls()
 
     @classmethod
     def reset_instance(cls) -> None:
-        """释放配置单例，供测试隔离使用。"""
+        """重置配置服务单例。"""
         if cls._instance is not None:
             cls._instance.shutdown()
         cls._instance = None
@@ -96,11 +92,11 @@ class ConfigService:
 
     @classmethod
     def set_log_handler(cls, handler: Optional[Callable[[str], None]]) -> None:
-        """注入外部日志处理逻辑。"""
+        """设置错误日志处理器。"""
         cls._log_handler = handler
 
     def _error_handler(self, message: str) -> None:
-        """存储层错误转译。"""
+        """分发配置存储错误信息。"""
         if self._log_handler:
             try:
                 self._log_handler(message)
@@ -108,13 +104,13 @@ class ConfigService:
                 pass
 
     def shutdown(self) -> None:
-        """停机清理：执行最终落盘。"""
+        """保存配置到磁盘。"""
         # noinspection PyProtectedMember
         if self._storage._config_changed:
             self._storage.save(self._config)
 
     def _get_field(self, name: str, expected_type: Type[T], default_value: T) -> T:
-        """获取配置字段值，支持缓存/类型恢复与默认值降级。"""
+        """读取并转换配置字段值。"""
         value = self._config.get(name)
         if value is None:
             return default_value
@@ -126,7 +122,7 @@ class ConfigService:
         return value
 
     def _set_field(self, name: str, expected_type: Type[T], value: Any) -> None:
-        """设置配置字段值，并触发持久化落盘。"""
+        """修改配置字段值并保存。"""
         if value is not None and not isinstance(value, expected_type):
             raise TypeError(
                 f"字段 '{name}' 类型错误：期望 {expected_type.__name__}, 实际为 {type(value).__name__}"
@@ -141,170 +137,176 @@ class ConfigService:
 
     @property
     def client(self) -> str:
-        """客户端名称。"""
-        return self._get_field("client", str, "Telegram.exe")
+        """获取客户端可执行文件名。"""
+        return self._get_field("client", str, TELEGRAM_EXE)
 
     @client.setter
     def client(self, value: str) -> None:
+        """设置客户端可执行文件名。"""
         self._set_field("client", str, value)
 
     @property
     def path(self) -> str:
-        """数据目录路径。"""
+        """获取客户端数据目录路径。"""
         return self._get_field("path", str, "")
 
     @path.setter
     def path(self, value: str) -> None:
+        """设置客户端数据目录路径。"""
         self._set_field("path", str, value)
 
     @property
     def default(self) -> str:
-        """默认账号 tag。"""
+        """获取默认账户标签。"""
         return self._get_field("default", str, "")
 
     @default.setter
     def default(self, value: str) -> None:
+        """设置默认账户标签。"""
         self._set_field("default", str, value)
 
     @property
     def tags(self) -> Dict[str, Dict[str, Any]]:
-        """账号配置数据映射表。"""
+        """获取已注册账户列表。"""
         return self._get_field("tags", dict, {})
 
     @tags.setter
     def tags(self, value: Dict[str, Dict[str, Any]]) -> None:
+        """设置已注册账户列表。"""
         self._set_field("tags", dict, value)
 
     @property
     def log_output(self) -> bool:
-        """是否输出日志。"""
+        """获取日志输出状态。"""
         return self._get_field("log_output", bool, True)
 
     @log_output.setter
     def log_output(self, value: bool) -> None:
+        """设置日志输出状态。"""
         self._set_field("log_output", bool, value)
 
     @property
     def agreed_to_decrypt(self) -> bool:
-        """是否同意解密 Telegram key_datas。"""
+        """获取密钥解密同意状态。"""
         return self._get_field("agreed_to_decrypt", bool, False)
 
     @agreed_to_decrypt.setter
     def agreed_to_decrypt(self, value: bool) -> None:
+        """设置密钥解密同意状态。"""
         self._set_field("agreed_to_decrypt", bool, value)
 
     @property
     def start_time(self) -> Optional[datetime]:
-        """start_time 方法。"""
+        """获取会话启动时间。"""
         return self._runtime.start_time
 
     @start_time.setter
     def start_time(self, v):
-        """start_time 方法。"""
+        """设置会话启动时间。"""
         self._runtime.start_time = v
 
     @property
     def tag(self) -> str:
-        """tag 方法。"""
+        """获取账户标签。"""
         return self._runtime.tag
 
     @tag.setter
     def tag(self, v):
-        """tag 方法。"""
+        """设置账户标签。"""
         self._runtime.tag = str(v) if v is not None else ""
 
     @property
     def force_key_login(self) -> bool:
-        """force_key_login 方法。"""
+        """获取强制密钥登录状态。"""
         return self._runtime.force_key_login
 
     @force_key_login.setter
     def force_key_login(self, v):
-        """force_key_login 方法。"""
+        """设置强制密钥登录状态。"""
         self._runtime.force_key_login = bool(v)
 
     @property
     def pwd(self) -> str:
-        """pwd 方法。"""
+        """获取临时解密密码。"""
         return self._runtime.password
 
     @pwd.setter
     def pwd(self, v):
-        """pwd 方法。"""
+        """设置临时解密密码。"""
         self._runtime.password = str(v) if v is not None else ""
 
     @property
     def decrypted(self) -> bool:
-        """decrypted 方法。"""
+        """获取解密成功状态。"""
         return self._runtime.decrypted
 
     @decrypted.setter
     def decrypted(self, v):
-        """decrypted 方法。"""
+        """设置解密成功状态。"""
         self._runtime.decrypted = bool(v)
 
     @property
     def has_backup(self) -> bool:
-        """has_backup 方法。"""
+        """检查是否存在密钥备份。"""
         return self.has_complete_keys(self.tag)
 
     @property
     def configs(self) -> Dict[str, Any]:
-        """获取当前配置数据的浅拷贝。"""
+        """获取全局配置字典副本。"""
         return self._config.copy()
 
     @property
     def config_file(self) -> Path:
-        """config_file 方法。"""
+        """获取配置文件路径。"""
         # noinspection PyProtectedMember
         return self._storage._config_path
 
     def get_all_accounts(self) -> Dict[str, Dict[str, Any]]:
-        """get_all_accounts 方法。"""
+        """获取所有已注册账户的数据。"""
         return dict(self.tags)
 
     def get_tag_list(self) -> list[str]:
-        """get_tag_list 方法。"""
+        """获取所有账户的标签列表。"""
         return list(self.tags.keys())
 
     def get_account(self, tag: str) -> Dict[str, Any]:
-        """获取特定账户配置，不存在时返回空模板。"""
+        """获取指定账户的详细数据。"""
         return self.tags.get(tag, {'id': '', 'folder': '', 'info': '', 'identity': '', 'key': ''})
 
     def set_account(self, tag: str, data: Dict[str, Any]) -> None:
-        """更新/新增账户配置。"""
+        """设置或更新指定账户的数据。"""
         tags: Dict[str, Dict[str, Any]] = dict(self.tags)
         tags[tag] = data
         self.tags = tags
 
     def remove_account(self, tag: str) -> None:
-        """remove_account 方法。"""
+        """移除指定账户的注册信息。"""
         tags: Dict[str, Dict[str, Any]] = self.tags.copy()
         if tag in tags:
             del tags[tag]
             self.tags = tags
 
     def batch_update(self, updates: Dict[str, Any]) -> None:
-        """在一次事务中应用多项配置更新。"""
+        """批量更新配置项。"""
         with self:
             for key, value in updates.items():
                 setattr(self, key, value)
 
     def login_with_keys(self, tag: str, tdata_path: str) -> bool:
-        """login_with_keys 方法。"""
+        """使用备份的密钥还原登录状态。"""
         return TelegramKeyManager.login_with_keys(tag, tdata_path, self)
 
     def backup_account_keys(self, tag: str, folder_path: Path) -> bool:
-        """backup_account_keys 方法。"""
+        """备份指定账户的密钥文件。"""
         return TelegramKeyManager.backup_keys(tag, folder_path, self)
 
     def has_complete_keys(self, tag: str) -> bool:
-        """has_complete_keys 方法。"""
+        """检查指定账户是否有完整的备份密钥。"""
         acc = self.get_account(tag)
         return all(acc.get(k) for k in ('key', 'identity', 'info'))
 
     def sync_all_account_paths(self) -> None:
-        """扫描磁盘目录，将账户文件夹信息与配置表进行同步。"""
+        """同步更新账户的物理路径。"""
         if not self.path or not os.path.isdir(self.path):
             return
 
@@ -319,7 +321,7 @@ class ConfigService:
             self.tags = updated_tags
 
     def watch_time(self) -> str:
-        """格式化程序运行时间。"""
+        """获取活跃账户的格式化运行时间。"""
         start_time = self.start_time
         if start_time is None:
             return "0时0分0秒"

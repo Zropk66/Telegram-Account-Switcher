@@ -1,8 +1,4 @@
-"""
-日志模块测试。
-
-验证 Logger 的测试隔离入口能恢复全局注入状态，避免单例和回调泄漏到后续用例。
-"""
+"""日志模块单元测试。"""
 
 from src.core.logger import (
     DefaultConfigProvider,
@@ -15,7 +11,10 @@ from src.core.logger import (
 
 
 class DummyConfigProvider:
+    """虚拟配置提供者。"""
+
     def get(self, key, default=None):
+        """获取配置。"""
         return True
 
 

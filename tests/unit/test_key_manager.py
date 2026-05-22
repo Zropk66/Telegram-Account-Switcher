@@ -1,14 +1,11 @@
-"""
-TelegramKeyManager 密钥管理单元测试。
-
-验证 Telegram 账户密钥的备份、恢复和不完整数据拒绝策略。
-"""
+"""密钥管理单元测试。"""
 import base64
-import pytest
 from unittest.mock import MagicMock
 
-from src.core.config.key_manager import TelegramKeyManager
+import pytest
+
 from src.core.config.config import PathConfig
+from src.core.config.key_manager import TelegramKeyManager
 
 
 class TestTelegramKeyManager:
@@ -16,7 +13,7 @@ class TestTelegramKeyManager:
 
     @pytest.fixture
     def temp_dir(self, tmp_path):
-        """提供临时目录用于隔离文件系统操作。"""
+        """提供隔离文件系统操作的临时目录。"""
         return tmp_path
 
     @pytest.fixture

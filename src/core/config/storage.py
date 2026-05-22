@@ -1,29 +1,27 @@
 """
-配置存储持久化。
-
-实现 JSON 文件的原子写入策略（写入临时文件 -> fsync -> 替换）。
+本地配置文件持久化（JSON）。
 """
 import json
 import os
+import tempfile
+import threading
 from contextlib import suppress
 from pathlib import Path
 from typing import Dict, Any, TYPE_CHECKING, Optional, Callable
 
-
 if TYPE_CHECKING:
-    from .service import ConfigService
+    pass
 
 
 class ConfigStorage:
-    """
-    基于 JSON 的本地文件持久化存储。
-    """
+    """本地配置存储器。"""
 
     def __init__(self, config_path: Path, default_config: Dict[str, Any],
                  error_handler: Optional[Callable[[str], None]] = None):
+        """初始化 JSON 配置存储器。"""
         self._config_path = config_path
-        self._temp_file = config_path.with_suffix(".tmp")
         self._default_config = default_config
+        self._lock = threading.Lock()
 
         self._config_changed = False
         self._batch = False
@@ -31,7 +29,7 @@ class ConfigStorage:
         self._error_handler = error_handler
 
     def load(self) -> Dict[str, Any]:
-        """加载配置。若文件不存在或损坏，则用默认值初始化。"""
+        """从文件加载配置。"""
         try:
             if not self._config_path.exists():
                 self.save(self._default_config)
@@ -41,66 +39,90 @@ class ConfigStorage:
                 loaded = json.load(f)
                 if not isinstance(loaded, dict):
                     loaded = {}
-                # 合并配置
                 self._config = {**self._default_config, **loaded}
                 return self._config.copy()
         except (json.JSONDecodeError, IOError):
             return self._default_config.copy()
 
     def _log_error(self, message: str) -> None:
+        """记录错误信息。"""
         if self._error_handler:
             with suppress(Exception):
                 self._error_handler(message)
 
     def save(self, configs: Dict[str, Any]) -> None:
-        """原子落盘策略。"""
-        try:
-            self._config_path.parent.mkdir(parents=True, exist_ok=True)
+        """保存配置到文件。"""
+        with self._lock:
+            temp_file = None
+            try:
+                self._config_path.parent.mkdir(parents=True, exist_ok=True)
 
-            # 仅持久化定义在默认配置中的键
-            to_save = {k: v for k, v in dict(configs).items() if k in self._default_config}
+                to_save = {k: v for k, v in dict(configs).items() if k in self._default_config}
 
-            with open(self._temp_file, "w", encoding="utf-8") as f:
-                json.dump(to_save, f, indent=4, ensure_ascii=False)
-                f.flush()
-                os.fsync(f.fileno())  # 强制刷入磁盘
+                fd, temp_path_str = tempfile.mkstemp(
+                    dir=str(self._config_path.parent),
+                    prefix="configs-",
+                    suffix=".json.tmp",
+                    text=True
+                )
+                temp_file = Path(temp_path_str)
 
-            os.replace(self._temp_file, self._config_path)
-            self._config_changed = False
-        except Exception as e:
-            self._log_error(f"配置文件落盘失败: {e}")
-        finally:
-            with suppress(OSError):
-                if self._temp_file.exists():
-                    self._temp_file.unlink()
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(to_save, f, indent=4, ensure_ascii=False)
+                    f.flush()
+                    os.fsync(f.fileno())
+
+                os.replace(temp_file, self._config_path)
+                temp_file = None
+                self._config_changed = False
+            except Exception as e:
+                self._log_error(f"配置文件落盘失败: {e}")
+            finally:
+                if temp_file is not None:
+                    with suppress(OSError):
+                        if temp_file.exists():
+                            temp_file.unlink()
 
 
 class InMemoryConfigStorage:
-    """仅存在于内存的配置存储（用于测试环境）。"""
+    """内存配置存储器。"""
 
     def __init__(self, default_config: Dict[str, Any]):
+        """初始化内存配置存储器。"""
         self._config = default_config.copy()
         self._config_changed = False
         self._batch = False
 
     def load(self) -> Dict[str, Any]:
+        """加载内存中的配置。"""
         return self._config.copy()
 
     def save(self, configs: Dict[str, Any]) -> None:
+        """保存配置到内存。"""
         self._config = dict(configs)
         self._config_changed = False
 
     @property
-    def config_path(self) -> Path: return Path(":memory:")
+    def config_path(self) -> Path:
+        """获取内存配置存储路径。"""
+        return Path(":memory:")
 
     @property
-    def config_changed(self) -> bool: return self._config_changed
+    def config_changed(self) -> bool:
+        """获取配置变更状态。"""
+        return self._config_changed
 
     @config_changed.setter
-    def config_changed(self, v): self._config_changed = v
+    def config_changed(self, v):
+        """设置配置变更状态。"""
+        self._config_changed = v
 
     @property
-    def batch(self) -> bool: return self._batch
+    def batch(self) -> bool:
+        """获取批量更新状态。"""
+        return self._batch
 
     @batch.setter
-    def batch(self, v): self._batch = v
+    def batch(self, v):
+        """设置批量更新状态。"""
+        self._batch = v

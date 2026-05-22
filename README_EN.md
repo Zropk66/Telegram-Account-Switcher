@@ -1,5 +1,7 @@
 # Telegram Account Switcher (TAS)
 
+English | [简体中文](README.md)
+
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
 ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)
 ![Version](https://img.shields.io/badge/Latest-v2.0.0-brightgreen)
@@ -161,10 +163,6 @@ Issue reports and Pull Requests are welcome!
 3. Commit your changes `git commit -m "feat: add new feature"`
 4. Push to the branch `git push origin feature/your-feature`
 5. Create a Pull Request
-
-## Changelog
-
-See [Changelog](CHANGELOG.md) for detailed update information.
 
 ## License
 

@@ -1,9 +1,4 @@
-"""
-设置界面的后台异步服务模块。
-
-提供基于 `QRunnable` 和信号机制的异步任务执行框架，用于在后台线程处理
-文件扫描、配置加载等耗时操作，避免阻塞 UI 线程。
-"""
+"""设置界面的后台服务。"""
 
 from PySide6.QtCore import QObject, Signal, QRunnable, Slot
 
@@ -11,7 +6,7 @@ from src.core import TASException
 
 
 class SignalsEmitter(QObject):
-    """异步任务结果通信器。"""
+    """任务结果通信器。"""
 
     finished = Signal(object)
     warning = Signal(object)

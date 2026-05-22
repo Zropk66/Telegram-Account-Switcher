@@ -1,15 +1,12 @@
-"""
-账户切换集成测试。
-
-验证账户切换主流程中配置、进程控制、文件交换和恢复服务之间的协作行为。
-"""
-import pytest
-from unittest.mock import MagicMock, patch
+"""账户切换集成测试。"""
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
-from src.core.account.account_switcher import AccountSwitcher
+import pytest
+
 from src.core.account.account_operations import switch_to_tag
 from src.core.account.account_services import AccountRecoveryService
+from src.core.account.account_switcher import AccountSwitcher
 
 
 class TestIntegrationAccountSwitch:

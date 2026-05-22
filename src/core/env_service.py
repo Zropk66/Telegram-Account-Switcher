@@ -1,7 +1,5 @@
 """
-Telegram 环境探测服务。
-
-负责探测 Telegram 客户端的安装位置，以及扫描本地目录以识别合法的账户文件夹。
+Telegram 运行环境探测。
 """
 import base64
 import winreg
@@ -9,20 +7,27 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Dict, Any, Tuple
 
+from src.core.constants import (
+    TELEGRAM_REG_KEY,
+    KEY_FOLDER,
+    IDENTITY_FOLDER,
+    TELEGRAM_IDENTITY_KEY,
+    INFO_SUBFOLDER,
+    TAG_FILE
+)
 from src.core.crypto_service import AccountDataCryptoService
-from src.core.exceptions import TASException
 from src.core.exceptions import TASException
 
 
 class TelegramEnvService:
-    """负责 OS 级环境配置读取与账户目录扫描的服务类。"""
+    """环境检测服务。"""
 
     @staticmethod
     def search_client() -> Tuple[str, str]:
-        """通过查询注册表 tg:// 协议关联获取 Telegram 客户端的安装路径。 """
+        """查找客户端路径。"""
         try:
-            key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, r"tg\shell\open\command")
-            command = winreg.QueryValue(key, None)
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, TELEGRAM_REG_KEY) as key:
+                command = winreg.QueryValue(key, None)
 
             exe_path = Path(TelegramEnvService._extract_path(command)).resolve(strict=True)
             if not exe_path.is_file():
@@ -34,7 +39,7 @@ class TelegramEnvService:
 
     @staticmethod
     def _extract_path(command: str) -> str:
-        """从注册表命令行字符串中提取可执行路径。"""
+        """从命令行提取路径。"""
         if not command:
             raise AttributeError("命令为空")
 
@@ -47,25 +52,28 @@ class TelegramEnvService:
 
     @staticmethod
     def scan_accounts(base_path: str, passcode: str = None) -> Dict[str, Dict[str, Any]]:
-        """扫描目录下的所有有效账户文件夹。"""
+        """扫描所有账户。"""
         results = {}
         base = Path(base_path)
         if not base.is_dir():
             return results
 
-        feature_files = ['key_datas', 'settingss', 'D877F783D5D3EF8Cs']
+        feature_files = [KEY_FOLDER, 'settingss', IDENTITY_FOLDER]
 
         for entry in base.iterdir():
             if not entry.is_dir():
                 continue
 
-            if any((entry / f).exists() for f in feature_files) or (entry / 'D877F783D5D3EF8C' / 'maps').exists():
+            if any((entry / f).exists() for f in feature_files) or (entry / TELEGRAM_IDENTITY_KEY / INFO_SUBFOLDER).exists():
                 folder_name = entry.name
 
                 user_id = AccountDataCryptoService.decrypt_account_id(entry, passcode) or ""
 
-                tag_file = entry / "tas_tag"
-                tag_name = tag_file.read_text(encoding="utf-8").strip() if tag_file.is_file() else folder_name
+                tag_file = entry / TAG_FILE
+                tag_name = folder_name
+                if tag_file.is_file():
+                    with suppress(Exception):
+                        tag_name = tag_file.read_text(encoding="utf-8").strip()
 
                 account_data = {
                     'id': user_id,
@@ -75,14 +83,14 @@ class TelegramEnvService:
                 }
 
                 def _b64_save(path: Path) -> str:
-                    """内部方法：_b64_save。"""
+                    """Base64编码保存。"""
                     with suppress(Exception):
                         return base64.b64encode(path.read_bytes()).decode()
                     return ""
 
-                account_data['info'] = _b64_save(entry / 'D877F783D5D3EF8C' / 'maps')
-                account_data['identity'] = _b64_save(entry / 'D877F783D5D3EF8Cs')
-                account_data['key'] = _b64_save(entry / 'key_datas')
+                account_data['info'] = _b64_save(entry / TELEGRAM_IDENTITY_KEY / INFO_SUBFOLDER)
+                account_data['identity'] = _b64_save(entry / IDENTITY_FOLDER)
+                account_data['key'] = _b64_save(entry / KEY_FOLDER)
 
                 results[folder_name] = account_data
 

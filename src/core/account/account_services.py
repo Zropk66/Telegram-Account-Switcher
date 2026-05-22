@@ -1,17 +1,18 @@
 """
-账户文件系统管理与异常恢复服务。
+账户文件夹操作与异常恢复。
 """
 
-import contextlib
 from pathlib import Path
 from typing import Optional
 
 from src.core.config import ConfigService
+from src.core.constants import TAG_FILE, TDATA_DIR, KEY_FOLDER
 from src.core.logger import Logger
+from src.core.utils import safe_rename
 
 
 def find_account_folder(base_path_str: str, tag_name: str) -> Optional[str]:
-    """依据标签文件 `tas_tag` 定位账户对应文件夹。"""
+    """遍历 Telegram 目录，寻找含有匹配 tas_tag 标签文件的文件夹。"""
     try:
         base_dir = Path(base_path_str)
         if not base_dir.is_dir():
@@ -19,23 +20,24 @@ def find_account_folder(base_path_str: str, tag_name: str) -> Optional[str]:
 
         for entry in base_dir.iterdir():
             if entry.is_dir():
-                tas_tag_file = entry / "tas_tag"
+                tas_tag_file = entry / TAG_FILE
                 if tas_tag_file.exists():
                     try:
                         content = tas_tag_file.read_bytes()
                         if content.decode("utf-8").strip() == tag_name:
                             return entry.name
-                    except (OSError, UnicodeDecodeError):
-                        pass
+                    except (OSError, UnicodeDecodeError) as e:
+                        Logger().warning(f"读取或解析目录 {entry.name} 中的 {TAG_FILE} 失败: {e}")
         return None
-    except OSError:
+    except OSError as e:
+        Logger().error(f"遍历账户根目录失败: {e}")
         return None
 
 
 def swap_active_tdata_with_target(base_path_str: str, target_folder_name: str, temp_prefix: str) -> bool:
-    """以原子方式交换当前活跃的 `tdata` 与目标账户文件夹。"""
+    """原子化地交换活跃 tdata 与目标账户目录。"""
     base_path = Path(base_path_str)
-    tdata_path = base_path / "tdata"
+    tdata_path = base_path / TDATA_DIR
     temp_path = base_path / temp_prefix
     target_path = base_path / target_folder_name
 
@@ -43,44 +45,27 @@ def swap_active_tdata_with_target(base_path_str: str, target_folder_name: str, t
         return True
 
     try:
-        with _atomic_rename(tdata_path, temp_path):
+        with safe_rename(tdata_path, temp_path):
             target_path.rename(tdata_path)
         return True
     except (FileNotFoundError, PermissionError, OSError):
         return False
 
 
-@contextlib.contextmanager
-def _atomic_rename(src: Path, dst: Path):
-    """提供临时目录中转的安全重命名上下文。"""
-    if not src.exists():
-        yield
-        return
-
-    src.rename(dst)
-    try:
-        yield
-    except Exception:
-        if dst.exists() and not src.exists():
-            with contextlib.suppress(Exception):
-                dst.rename(src)
-        raise
-
-
 def get_key_datas_path(folder_path: Path) -> Path:
-    """获取账户加密数据文件的路径。"""
-    return folder_path / "key_datas"
+    """获取指定文件夹下 key_datas 文件的完整路径。"""
+    return folder_path / KEY_FOLDER
 
 
 class AccountRecoveryService:
-    """处理异常切换场景，包括遗留文件夹清理与备份密钥的重建。"""
+    """账户恢复服务。"""
 
     def __init__(self, logger: Logger):
-        """初始化。"""
+        """初始化账户恢复服务。"""
         self.logger = logger
 
     def cleanup_orphan_folders(self, base_path_str: str):
-        """若上次切换因进程崩溃未完成，尝试从临时目录恢复到 `tdata`。"""
+        """清理异常中断遗留的临时文件夹。"""
         if not base_path_str:
             return
 
@@ -88,19 +73,20 @@ class AccountRecoveryService:
         if not base_path.is_dir():
             return
 
-        tdata_path = base_path / "tdata"
+        tdata_path = Path(base_path_str) / TDATA_DIR
         if not tdata_path.exists():
-            for entry in base_path.iterdir():
-                if entry.name.startswith("tdata-") and entry.is_dir():
+            for entry in Path(base_path_str).iterdir():
+                if entry.name.startswith(f"{TDATA_DIR}-") and entry.is_dir():
                     try:
                         self.logger.warning(f"检测到异常中断，正在从 {entry.name} 恢复...")
                         entry.rename(tdata_path)
                         return
-                    except OSError:
+                    except OSError as rename_err:
+                        self.logger.warning(f"从临时目录 {entry.name} 恢复 {TDATA_DIR} 失败: {rename_err}")
                         continue
 
     def recover_account(self, tag: str, config_manage: ConfigService) -> bool:
-        """尝试使用备份密钥重新构建损坏的账户数据。"""
+        """从备份密钥还原损坏的账户。"""
         self.logger.warning(f"检测到账户 '{tag}' 可能损坏，执行恢复...")
         target_account = config_manage.get_account(tag)
         if target_account and target_account.get('folder'):

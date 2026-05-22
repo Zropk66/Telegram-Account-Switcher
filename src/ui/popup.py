@@ -1,25 +1,17 @@
-"""
-全局弹窗管理器，提供统一且线程安全的弹窗交互接口。
-
-基于 PySide6 实现，确保应用在 GUI 模式或脚本上下文（通过上下文管理器）
-下均能稳定弹出提示框与确认框。
-"""
+"""全局消息弹窗管理器。"""
 
 import sys
 import threading
 from typing import Literal, Optional
 
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QObject, Signal, Slot
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 
 class Popup(QObject):
-    """
-    单例弹窗管理器，负责封装 QMessageBox 操作。
+    """全局弹窗管理器。"""
 
-    可直接调用类方法 (`Popup.alert`, `Popup.confirm`) 进行操作，
-    在脚本环境下，建议通过 `with Popup.context()` 管理事件循环。
-    """
+    _alert_signal = Signal(str, str, str)
 
     _instance: Optional["Popup"] = None
     _instance_lock = threading.Lock()
@@ -27,7 +19,7 @@ class Popup(QObject):
     _current_popup: Optional[QMessageBox] = None
 
     def __new__(cls, *args, **kwargs):
-        """内部方法：__new__。"""
+        """实现单例。"""
         if cls._instance is None:
             with cls._instance_lock:
                 if cls._instance is None:
@@ -39,11 +31,17 @@ class Popup(QObject):
         if hasattr(self, "_initialized"):
             return
         super().__init__()
+        self._alert_signal.connect(self._alert_on_main_thread)
         self._initialized = True
+
+    @Slot(str, str, str)
+    def _alert_on_main_thread(self, message: str, title: str, icon: str) -> None:
+        """主线程展示弹窗。"""
+        self._alert_impl(message, title, icon)
 
     @classmethod
     def reset_instance(cls) -> None:
-        """重置单例状态，主要用于测试清理。"""
+        """重置弹窗单例状态。"""
         with cls._instance_lock:
             cls._instance = None
             cls._app = None
@@ -51,17 +49,17 @@ class Popup(QObject):
 
     @classmethod
     def get_instance(cls) -> "Popup":
-        """获取 Popup 实例。"""
+        """获取管理器单例。"""
         return cls()
 
     @classmethod
     def instance(cls) -> "Popup":
-        """获取 Popup 实例的快捷方式。"""
+        """获取管理器单例。"""
         return cls()
 
     @classmethod
     def _ensure_app(cls) -> QApplication:
-        """确保 QApplication 实例就绪，它是弹窗显示的前置条件。"""
+        """确保 QApplication 实例已初始化。"""
         if cls._app is not None:
             return cls._app
 
@@ -75,25 +73,25 @@ class Popup(QObject):
 
     @classmethod
     def _get_active_window(cls):
-        """获取当前活动的 UI 窗口。"""
+        """获取活跃的窗口。"""
         app = QApplication.instance()
         return app.activeWindow() if app else None
 
     @classmethod
     def _close_current(cls) -> None:
-        """关闭当前挂起的弹窗。"""
+        """关闭活跃弹窗。"""
         if cls._current_popup is not None:
             cls._current_popup.close()
             cls._current_popup = None
 
     @classmethod
-    def alert(
+    def _alert_impl(
             cls,
             message: str,
             title: str = "提示",
             icon: str = "info"
     ) -> None:
-        """弹出提示框，阻塞直到用户确认。"""
+        """显示提示框的具体实现。"""
         cls._ensure_app()
         cls._close_current()
 
@@ -114,8 +112,22 @@ class Popup(QObject):
         msg_box.exec()
 
     @classmethod
+    def alert(
+            cls,
+            message: str,
+            title: str = "提示",
+            icon: str = "info"
+    ) -> None:
+        """线程安全地弹出提示框。"""
+        inst = cls.instance()
+        if threading.current_thread() != threading.main_thread():
+            inst._alert_signal.emit(message, title, icon)
+        else:
+            cls._alert_impl(message, title, icon)
+
+    @classmethod
     def confirm(cls, message: str, title: str = "确认") -> bool:
-        """弹出确认对话框，返回用户是否点击“是”。"""
+        """弹出确认选择框。"""
         cls._ensure_app()
         cls._close_current()
 
@@ -134,20 +146,20 @@ class Popup(QObject):
 
     @classmethod
     def context(cls):
-        """返回弹窗上下文管理器，支持在非 GUI 循环场景下操作。"""
+        """提供消息泵上下文管理器。"""
         return _PopupContext()
 
 
 class _PopupContext:
-    """提供进入/退出上下文时的自动状态管理。"""
+    """消息泵上下文。"""
 
     def __enter__(self):
-        """内部方法：__enter__。"""
+        """进入上下文并确保应用程序实例化。"""
         Popup._ensure_app()
         return Popup
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """内部方法：__exit__。"""
+        """退出上下文并处理挂起的事件。"""
         if Popup._app is not None:
             Popup._app.processEvents()
         return False
@@ -158,10 +170,10 @@ def alert(
         title: str = "提示",
         icon: Literal["info", "warning", "error", "question"] = "info"
 ) -> None:
-    """提示框全局快捷函数。"""
+    """弹出提示框。"""
     Popup.alert(message, title, icon)
 
 
 def confirm(message: str, title: str = "确认") -> bool:
-    """确认框全局快捷函数。"""
+    """弹出确认选择框。"""
     return Popup.confirm(message, title)

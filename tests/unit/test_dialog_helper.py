@@ -1,17 +1,9 @@
-"""
-SettingsDialogHelper 单元测试。
-
-验证设置对话框辅助类的核心业务逻辑，包括对话框结果处理、配置持久化同步及账户文件系统联动。
-"""
+"""对话框辅助类单元测试。"""
 import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-# 设置 offscreen 模式，避免单元测试依赖真实显示器环境
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
-
-import pytest
-from PySide6.QtCore import Qt
 
 from src.ui.dialogs import SettingsDialogHelper, EditLabelDialog
 
@@ -162,7 +154,7 @@ class TestSettingsDialogHelper:
         assert tag_file.read_text(encoding="utf-8") == "my_test_tag"
 
     def test_handle_result_updates_default_when_tag_changed(self, tmp_path):
-        """验证当默认账户的标签名被重命名时，全局配置会自动同步。"""
+        """验证默认账户标签重命名时全局配置自动同步。"""
         mock_item = MagicMock()
         mock_item.data.return_value = {'tag': 'old_default_tag', 'id': '123', 'folder': 'folder'}
 
@@ -189,3 +181,66 @@ class TestSettingsDialogHelper:
         )
 
         update_cb.assert_any_call('default', 'new_default_tag')
+
+    def test_auto_fill_from_folder_success(self, qapp, tmp_path):
+        """验证文件夹中存在有效账户数据时，能正确提取并填充各字段。"""
+        folder_path = tmp_path / "tdata_test"
+        folder_path.mkdir()
+        (folder_path / "key_datas").write_bytes(b"dummy_key")
+        (folder_path / "D877F783D5D3EF8Cs").write_bytes(b"dummy_identity")
+        maps_dir = folder_path / "D877F783D5D3EF8C"
+        maps_dir.mkdir()
+        (maps_dir / "maps").write_bytes(b"dummy_maps")
+        (folder_path / "tas_tag").write_text("my_tag", encoding="utf-8")
+
+        dialog = EditLabelDialog(parent=None)
+
+        with patch('src.core.crypto_service.AccountDataCryptoService.decrypt_account_id', return_value="99999") as mock_decrypt:
+            dialog.auto_fill_from_folder(str(folder_path))
+            assert mock_decrypt.called
+            assert Path(mock_decrypt.call_args[0][0]) == folder_path
+
+        assert dialog.ui.user_id_edit.text() == "99999"
+        assert dialog.ui.tag_edit.text() == "my_tag"
+
+        import base64
+        assert dialog._key == base64.b64encode(b"dummy_key").decode()
+        assert dialog._identity == base64.b64encode(b"dummy_identity").decode()
+        assert dialog._info == base64.b64encode(b"dummy_maps").decode()
+
+    def test_auto_fill_from_folder_relative_path(self, qapp, tmp_path):
+        """验证使用相对路径时，能通过父组件关联至基准路径并正确提取数据。"""
+        from PySide6.QtWidgets import QWidget
+        base_path = tmp_path / "telegram"
+        base_path.mkdir()
+        folder_path = base_path / "tdata_rel"
+        folder_path.mkdir()
+        (folder_path / "key_datas").write_bytes(b"dummy_key_rel")
+
+        mock_parent = QWidget()
+        mock_parent.ui = MagicMock()
+        mock_parent.ui.path_edit = MagicMock()
+        mock_parent.ui.path_edit.text.return_value = str(base_path)
+        mock_parent.config = MagicMock()
+        mock_parent.config.pwd = "my_pwd"
+
+        dialog = EditLabelDialog(parent=mock_parent)
+
+        with patch('src.core.crypto_service.AccountDataCryptoService.decrypt_account_id', return_value="111222") as mock_decrypt:
+            dialog.auto_fill_from_folder("tdata_rel")
+            assert mock_decrypt.called
+            assert mock_decrypt.call_args[0][1] == "my_pwd"
+            call_path = mock_decrypt.call_args[0][0]
+            assert Path(call_path) == folder_path
+
+        assert dialog.ui.user_id_edit.text() == "111222"
+        import base64
+        assert dialog._key == base64.b64encode(b"dummy_key_rel").decode()
+
+    def test_auto_fill_from_folder_invalid_folder_ignored(self, qapp):
+        """验证无效文件夹路径在自动填充时被安全忽略。"""
+        dialog = EditLabelDialog(parent=None)
+        dialog.auto_fill_from_folder("non_existent_folder_path_12345")
+        assert dialog.ui.user_id_edit.text() == ""
+        assert dialog._key == ""
+

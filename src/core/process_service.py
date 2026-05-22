@@ -1,64 +1,74 @@
-"""
-进程服务接口实现。
-
-提供对 `psutil` 的封装，允许通过 IProcessService 接口注入进程行为，
-以解决系统进程权限限制带来的单元测试难题。
-"""
+"""进程服务。"""
 from dataclasses import dataclass
 from typing import List
 
 import psutil
-from src.core.interfaces import ProcessInfo
+
+
+@dataclass
+class ProcessInfo:
+    """进程摘要信息。"""
+    pid: int
+    name: str
 
 
 @dataclass
 class MockProcess:
-    """内部使用的测试用进程模拟对象。"""
+    """模拟进程。"""
     pid: int
     name: str
     alive: bool = True
 
     def terminate(self):
-        """terminate 方法。"""
+        """终止模拟进程。"""
         self.alive = False
+
     def kill(self):
-        """kill 方法。"""
+        """强制杀死模拟进程。"""
         self.alive = False
 
 
 class PsutilProcessService:
-    """真实操作系统进程服务。"""
+    """系统进程服务。"""
 
-    def find_processes(self, name: str) -> List[ProcessInfo]:
-        """find_processes 方法。"""
+    @staticmethod
+    def find_processes(name: str) -> List[ProcessInfo]:
+        """查找指定名称的进程。"""
         processes = []
         try:
             for proc in psutil.process_iter(['pid', 'name']):
                 if proc.info.get('name') == name:
                     processes.append(ProcessInfo(pid=proc.info['pid'], name=proc.info['name']))
-        except Exception:
-            pass
+        except Exception as e:
+            from src.core.logger import Logger
+            Logger().error(f"遍历系统进程列表时发生异常: {e}")
         return processes
 
     @staticmethod
     def _safe_op(pid: int, op: str) -> bool:
-        """内部方法：_safe_op。"""
+        """安全执行进程操作。"""
         try:
             proc = psutil.Process(pid)
             getattr(proc, op)()
             return True
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        except psutil.AccessDenied as e:
+            from src.core.logger import Logger
+            Logger().warning(f"对进程 PID={pid} 执行 {op} 操作时被拒绝 (AccessDenied): {e}")
+            return False
+        except (psutil.NoSuchProcess, psutil.ZombieProcess):
             return False
 
     def terminate(self, pid: int) -> bool:
-        """terminate 方法。"""
+        """终止指定进程。"""
         return self._safe_op(pid, "terminate")
+
     def kill(self, pid: int) -> bool:
-        """kill 方法。"""
+        """强制杀死指定进程。"""
         return self._safe_op(pid, "kill")
 
-    def wait_for_process(self, pid: int, timeout: float) -> bool:
-        """wait_for_process 方法。"""
+    @staticmethod
+    def wait_for_process(pid: int, timeout: float) -> bool:
+        """等待指定进程结束。"""
         try:
             psutil.Process(pid).wait(timeout=timeout)
             return True
@@ -69,15 +79,15 @@ class PsutilProcessService:
 
 
 class MockProcessService:
-    """内存中的进程模拟服务，用于单元测试。"""
+    """模拟进程服务。"""
 
     def __init__(self):
-        """初始化。"""
+        """初始化模拟进程服务。"""
         self._processes: List[MockProcess] = []
         self._next_pid = 1
 
     def add_process(self, name: str, pid: int = None) -> MockProcess:
-        """add_process 方法。"""
+        """添加模拟进程。"""
         if pid is None:
             pid = self._next_pid
             self._next_pid += 1
@@ -86,11 +96,11 @@ class MockProcessService:
         return proc
 
     def find_processes(self, name: str) -> List[ProcessInfo]:
-        """find_processes 方法。"""
+        """查找指定名称的模拟进程。"""
         return [ProcessInfo(p.pid, p.name) for p in self._processes if p.name == name and p.alive]
 
     def terminate(self, pid: int) -> bool:
-        """terminate 方法。"""
+        """终止模拟进程。"""
         for proc in self._processes:
             if proc.pid == pid and proc.alive:
                 proc.terminate()
@@ -98,13 +108,14 @@ class MockProcessService:
         return False
 
     def kill(self, pid: int) -> bool:
-        """kill 方法。"""
+        """强制杀死模拟进程。"""
         for proc in self._processes:
             if proc.pid == pid and proc.alive:
                 proc.kill()
                 return True
         return False
 
-    def wait_for_process(self, pid: int, timeout: float) -> bool:
-        """wait_for_process 方法。"""
+    @staticmethod
+    def wait_for_process(pid: int, timeout: float) -> bool:
+        """模拟等待指定进程结束。"""
         return True

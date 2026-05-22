@@ -1,25 +1,24 @@
-"""
-命令行控制器模块。
-
-通过依赖注入实现业务逻辑与界面展示的解耦，支持账户加密、解密、切换等操作。
-"""
+"""命令行控制器。"""
 import argparse
 import sys
+from enum import Enum
 from pathlib import Path
 from typing import Optional, Tuple, Callable
 
 from src.core import AESCipher
 from src.core.config import ConfigService
+from src.core.constants import APP_VERSION, APP_TITLE, KEY_FOLDER
 from src.core.exceptions import TASConfigException
 from src.core.logger import Logger
 from src.core.utils import search_file_in_dirs
 
-# 回调类型别名
-HelpHandler = Callable[[str], None]
-SettingsHandler = Callable[[str], None]
-InfoHandler = Callable[[str], None]
-WarningHandler = Callable[[str], None]
-ErrorHandler = Callable[[str], None]
+
+class CLIAction(Enum):
+    """命令行操作类型。"""
+    CONTINUE = "continue"      # 无 CLI 操作，继续主流程
+    EXIT = "exit"              # 已处理 CLI 操作，安全退出
+    SHOW_HELP = "show_help"    # 需展示帮助界面
+    SHOW_SETTINGS = "show_settings"  # 需展示设置界面
 
 
 class CLIController:
@@ -27,15 +26,10 @@ class CLIController:
 
     def __init__(
             self,
-            version: str = "2.0.0",
+            version: str = APP_VERSION,
             config: Optional[ConfigService] = None,
             logger: Optional[Logger] = None,
-            cipher_factory: Optional[Callable[[str], AESCipher]] = None,
-            help_handler: Optional[HelpHandler] = None,
-            settings_handler: Optional[SettingsHandler] = None,
-            info_handler: Optional[InfoHandler] = None,
-            warning_handler: Optional[WarningHandler] = None,
-            error_handler: Optional[ErrorHandler] = None
+            cipher_factory: Optional[Callable[[str], AESCipher]] = None
     ):
         """初始化命令行控制器。"""
         self.version = version
@@ -43,16 +37,10 @@ class CLIController:
         self.logger = logger or Logger()
         self._cipher_factory = cipher_factory or (lambda pwd: AESCipher(pwd))
 
-        self._help_handler = help_handler
-        self._settings_handler = settings_handler
-        self._info_handler = info_handler
-        self._warning_handler = warning_handler
-        self._error_handler = error_handler
-
     @staticmethod
     def parse_args() -> argparse.Namespace:
         """解析命令行参数。"""
-        parser = argparse.ArgumentParser(description="TAS CLI", add_help=False, exit_on_error=False)
+        parser = argparse.ArgumentParser(description=f"{APP_TITLE} CLI", add_help=False, exit_on_error=False)
 
         action_group = parser.add_argument_group()
         action_group.add_argument("--encrypt", "-e", action="store_true", help="加密账户")
@@ -117,58 +105,30 @@ class CLIController:
             return self.config.default
         return tag
 
-    def handle_actions(self, args: argparse.Namespace) -> bool:
-        """根据解析结果分发到对应的处理方法。"""
+    def handle_actions(self, args: argparse.Namespace) -> CLIAction:
+        """根据解析结果返回执行意图。"""
         if args.help:
-            self._show_help()
+            return CLIAction.SHOW_HELP
         elif args.version:
-            self._show_version()
+            self.logger.info(f"TAS v{self.version}", popup=True)
+            return CLIAction.EXIT
         elif args.settings:
-            self._open_settings()
-        else:
-            if args.encrypt:
-                if args.tag:
-                    self._process_single_tag(args.tag, "encrypt")
-                else:
-                    self._process_tags("encrypt")
-            elif args.decrypt:
-                if args.tag:
-                    self._process_single_tag(args.tag, "decrypt")
-                else:
-                    self._process_tags("decrypt")
+            return CLIAction.SHOW_SETTINGS
+
+        if args.encrypt:
+            if args.tag:
+                self._process_single_tag(args.tag, "encrypt")
             else:
-                return False
-        return True
+                self._process_tags("encrypt")
+            return CLIAction.EXIT
+        elif args.decrypt:
+            if args.tag:
+                self._process_single_tag(args.tag, "decrypt")
+            else:
+                self._process_tags("decrypt")
+            return CLIAction.EXIT
 
-    def _show_help(self) -> None:
-        """弹出帮助窗口；无 UI 时降级为控制台输出。"""
-        if self._help_handler:
-            self._help_handler(self.version)
-        else:
-            print(f"TAS v{self.version}")
-            print("用法: tas [选项]")
-            print("选项:")
-            print("  -h, --help      显示帮助")
-            print("  -v, --version   显示版本")
-            print("  -c, --settings  打开设置")
-            print("  -e, --encrypt   加密账户")
-            print("  -d, --decrypt   解密账户")
-            print("  -s, --switch    切换账户")
-
-    def _show_version(self) -> None:
-        """显示版本号。"""
-        message = f"TAS v{self.version}"
-        if self._info_handler:
-            self._info_handler(message)
-        else:
-            print(message)
-
-    def _open_settings(self) -> None:
-        """打开设置窗口。"""
-        if self._settings_handler:
-            self._settings_handler(self.version)
-        else:
-            print("设置功能需要UI支持")
+        return CLIAction.CONTINUE
 
     def _process_tags(self, operation: str) -> None:
         """批量处理所有标签的加密或解密操作。"""
@@ -239,10 +199,10 @@ class CLIController:
         if not tag_path:
             return False, f"标签 '{tag}' 文件缺失"
 
-        key_datas_path = Path(self.config.path) / tag_path / "key_datas"
+        key_datas_path = Path(self.config.path) / tag_path / KEY_FOLDER
 
         if not key_datas_path.exists():
-            return False, "key_datas 文件不存在"
+            return False, f"{KEY_FOLDER} 文件不存在"
 
         try:
             if operation == "encrypt":
@@ -260,17 +220,11 @@ class CLIController:
     def _handle_info(self, message: str) -> None:
         """处理普通信息消息。"""
         self.logger.info(message, popup=True)
-        if self._info_handler:
-            self._info_handler(message)
 
     def _handle_warning(self, message: str) -> None:
         """处理警告消息。"""
         self.logger.warning(message, popup=True)
-        if self._warning_handler:
-            self._warning_handler(message)
 
     def _handle_error(self, message: str) -> None:
         """处理错误消息。"""
         self.logger.error(message, popup=True)
-        if self._error_handler:
-            self._error_handler(message)

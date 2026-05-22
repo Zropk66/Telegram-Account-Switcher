@@ -1,8 +1,4 @@
-"""
-配置管理公共入口。
-
-导出配置服务、只读配置数据、路径常量和存储实现。
-"""
+"""配置管理公共入口。"""
 
 from src.core.config.config import PathConfig
 from src.core.config.data import ConfigData

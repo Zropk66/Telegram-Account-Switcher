@@ -1,7 +1,5 @@
 """
 日志模块。
-
-基于 loguru 封装。
 """
 import sys
 import threading
@@ -17,15 +15,18 @@ _exception_level_registered = False
 
 
 class ConfigProvider(Protocol):
-    """配置读取契约，用于日志模块在初始化时判断是否需要输出到文件。"""
+    """配置读取接口。"""
 
-    def get(self, key: str, default: Any = None) -> Any: ...
+    def get(self, key: str, default: Any = None) -> Any:
+        """获取配置项的值。"""
+        ...
 
 
 class DefaultConfigProvider(ConfigProvider):
-    """默认兜底配置，不输出文件。"""
+    """默认配置实现。"""
 
     def get(self, key: str, default: Any = None) -> Any:
+        """获取配置值。"""
         return default
 
 
@@ -33,18 +34,18 @@ _config_provider: ConfigProvider = DefaultConfigProvider()
 
 
 def set_config_provider(provider: ConfigProvider) -> None:
-    """注入真实的配置提供者。"""
+    """注入配置提供者。"""
     global _config_provider
     _config_provider = provider
 
 
 def set_popup_handler(handler: Optional[PopupHandler]) -> None:
-    """注入 UI 层的弹窗逻辑。"""
+    """设置弹窗处理器。"""
     _popup_state["handler"] = handler
 
 
 def reset_logger_state() -> None:
-    """恢复日志模块的全局注入状态，供测试隔离使用。"""
+    """重置全局日志状态。"""
     global _config_provider
     Logger.reset_instance()
     _popup_state["handler"] = None
@@ -52,9 +53,10 @@ def reset_logger_state() -> None:
 
 
 def _setup_popup_bridge():
-    """将 loguru 的日志流通过 Sink 桥接到 UI 弹窗。"""
+    """桥接日志流到UI弹窗。"""
 
     def popup_sink(message):
+        """发送日志弹窗。"""
         extra = message.record.get("extra", {})
         if not extra.get("popup", False):
             return
@@ -90,6 +92,7 @@ class Logger:
     _lock = threading.Lock()
 
     def __new__(cls, *args, **kwargs):
+        """实现日志单例。"""
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
@@ -99,16 +102,18 @@ class Logger:
 
     @classmethod
     def get_instance(cls) -> "Logger":
+        """获取日志单例。"""
         return cls()
 
     @classmethod
     def reset_instance(cls) -> None:
-        """释放当前日志单例和 loguru sink，供测试隔离使用。"""
+        """释放日志单例。"""
         loguru_logger.remove()
         cls._instance = None
 
     @staticmethod
     def _init_logger():
+        """初始化日志配置。"""
         global _exception_level_registered
         loguru_logger.remove()
 
@@ -124,7 +129,6 @@ class Logger:
         )
 
         loguru_logger.add(sys.stderr, format=log_format, level="DEBUG", colorize=True)
-
         if _config_provider.get("log_output", False):
             loguru_logger.add(
                 "TAS.log",
@@ -138,24 +142,31 @@ class Logger:
 
     @staticmethod
     def log(level: str, message: str, popup: bool = False, **kwargs) -> None:
+        """记录日志。"""
         exc = kwargs.pop("exc", None)
         loguru_logger.opt(exception=exc, depth=2).bind(popup=popup, **kwargs).log(level, message)
 
     def debug(self, message, popup=False, **kwargs):
+        """记录调试日志。"""
         self.log("DEBUG", message, popup, **kwargs)
 
     def info(self, message, popup=False, **kwargs):
+        """记录普通日志。"""
         self.log("INFO", message, popup, **kwargs)
 
     def warning(self, message, popup=False, **kwargs):
+        """记录警告日志。"""
         self.log("WARNING", message, popup, **kwargs)
 
     def error(self, message, popup=False, **kwargs):
+        """记录错误日志。"""
         self.log("ERROR", message, popup, **kwargs)
 
     def critical(self, message, popup=False, **kwargs):
+        """记录严重错误日志。"""
         self.log("CRITICAL", message, popup, **kwargs)
 
     def exception(self, message, exc, popup=False, **kwargs):
+        """记录异常日志。"""
         kwargs["exc"] = exc
         self.log("EXCEPTION", message, popup, **kwargs)
