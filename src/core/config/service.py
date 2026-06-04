@@ -310,15 +310,30 @@ class ConfigService:
         if not self.path or not os.path.isdir(self.path):
             return
 
-        updated_tags: Dict[str, Dict[str, Any]] = self.tags.copy()
-        changed = False
-        for tag, info in updated_tags.items():
-            real_folder = search_file_in_dirs(self.path, tag)
-            if real_folder and info.get("folder") != real_folder:
-                info["folder"] = real_folder
-                changed = True
-        if changed:
-            self.tags = updated_tags
+        try:
+            base_dir = Path(self.path)
+            tag_to_folder = {}
+            for entry in base_dir.iterdir():
+                if entry.is_dir():
+                    tas_tag_file = entry / "tas_tag"
+                    if tas_tag_file.is_file():
+                        try:
+                            tag_name = tas_tag_file.read_text(encoding="utf-8").strip()
+                            tag_to_folder[tag_name] = entry.name
+                        except (OSError, UnicodeDecodeError) as e:
+                            self._error_handler(f"读取或解析目录 {entry.name} 中的 tas_tag 失败: {e}")
+
+            updated_tags: Dict[str, Dict[str, Any]] = self.tags.copy()
+            changed = False
+            for tag, info in updated_tags.items():
+                real_folder = tag_to_folder.get(tag)
+                if real_folder and info.get("folder") != real_folder:
+                    info["folder"] = real_folder
+                    changed = True
+            if changed:
+                self.tags = updated_tags
+        except OSError as e:
+            self._error_handler(f"遍历账户目录失败: {e}")
 
     def watch_time(self) -> str:
         """获取活跃账户的格式化运行时间。"""

@@ -96,7 +96,7 @@ def _account_switch(method: Literal["restore", "target"], max_retries: int = MAX
             if method_func(cipher, temp, tag_folder):
                 return True
 
-            delay(1)
+            delay(0.1)
 
         except TASCipherException as e:
             logger.error(f"无法解密账户 '{target_tag}': {e}", popup=True)
@@ -104,11 +104,11 @@ def _account_switch(method: Literal["restore", "target"], max_retries: int = MAX
         except PermissionError:
             if attempt == max_retries - 1:
                 raise TASException("权限不足. 请确保 Telegram 已完全关闭。")
-            delay(1)
+            delay(0.1)
         except (FileNotFoundError, OSError) as e:
             if attempt == max_retries - 1:
                 raise TASException(f"切换失败: {e}")
-            delay(1)
+            delay(0.1)
 
     return False
 

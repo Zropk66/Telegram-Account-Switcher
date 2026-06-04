@@ -74,7 +74,10 @@ class CLIController:
                 raise TASConfigException("路径格式不正确")
             if not self.config.default:
                 raise TASConfigException("未设置默认账户")
-            if not search_file_in_dirs(str(path), self.config.default):
+            default_folder = self.config.get_account(self.config.default).get("folder")
+            if default_folder and (path / default_folder).is_dir():
+                pass
+            elif not search_file_in_dirs(str(path), self.config.default):
                 raise TASConfigException(f"默认账户 '{self.config.default}' 文件夹未找到")
 
             return True
@@ -100,7 +103,15 @@ class CLIController:
         if tag == self.config.default:
             return tag
 
-        if tag not in self.config.tags or not search_file_in_dirs(self.config.path, tag):
+        if tag not in self.config.tags:
+            self.logger.warning(f"标签无效: {tag}")
+            return self.config.default
+
+        folder = self.config.get_account(tag).get("folder")
+        if folder and (Path(self.config.path) / folder).is_dir():
+            return tag
+
+        if not search_file_in_dirs(self.config.path, tag):
             self.logger.warning(f"标签无效或文件缺失: {tag}")
             return self.config.default
         return tag
@@ -195,9 +206,11 @@ class CLIController:
 
     def _process_tag(self, tag: str, operation: str, cipher: AESCipher) -> Tuple[bool, Optional[str]]:
         """执行单个标签的实际加密或解密操作。"""
-        tag_path = search_file_in_dirs(self.config.path, tag)
-        if not tag_path:
-            return False, f"标签 '{tag}' 文件缺失"
+        tag_path = self.config.get_account(tag).get("folder")
+        if not tag_path or not (Path(self.config.path) / tag_path).is_dir():
+            tag_path = search_file_in_dirs(self.config.path, tag)
+            if not tag_path:
+                return False, f"标签 '{tag}' 文件缺失"
 
         key_datas_path = Path(self.config.path) / tag_path / KEY_FOLDER
 

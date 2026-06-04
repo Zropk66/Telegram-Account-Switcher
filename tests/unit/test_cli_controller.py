@@ -80,7 +80,9 @@ def test_check_config_client_not_found(mock_config, mock_logger):
     with patch('src.core.cli_controller.search_file_in_dirs', return_value=None):
         with patch('src.core.cli_controller.Path') as mock_path:
             mock_path_instance = MagicMock()
-            mock_path_instance.is_file.return_value = False
+            mock_child = MagicMock()
+            mock_child.is_file.return_value = False
+            mock_path_instance.__truediv__.return_value = mock_child
             mock_path_instance.is_dir.return_value = True
             mock_path.return_value = mock_path_instance
 

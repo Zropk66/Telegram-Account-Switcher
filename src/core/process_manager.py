@@ -91,12 +91,23 @@ class ProcessManager:
             )
             self._popen_ref = proc
 
+            try:
+                import ctypes
+                res = ctypes.windll.user32.WaitForInputIdle(int(proc._handle), 10000)
+                if res == 0:
+                    return True
+            except Exception as e:
+                self._logger.debug(f"WaitForInputIdle 失败，使用备用检测方法: {e}")
+
             max_time = 15
             poll_interval = 0.1
             elapsed = 0.0
             success = False
 
             while elapsed < max_time:
+                if proc.poll() is None:
+                    success = True
+                    break
                 if self._process_service.find_processes(self._config.client):
                     success = True
                     break
