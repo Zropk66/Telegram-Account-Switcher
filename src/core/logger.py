@@ -128,7 +128,8 @@ class Logger:
             "<level>{message}</level>"
         )
 
-        loguru_logger.add(sys.stderr, format=log_format, level="DEBUG", colorize=True)
+        if sys.stderr is not None:
+            loguru_logger.add(sys.stderr, format=log_format, level="DEBUG", colorize=True)
         if _config_provider.get("log_output", False):
             loguru_logger.add(
                 "TAS.log",

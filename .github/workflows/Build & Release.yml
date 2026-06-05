@@ -60,6 +60,8 @@ jobs:
         shell: powershell
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          # 运行版本号生成助手更新 constants.py 中的 APP_VERSION
+          uv run python build_version.py
           $PY_VER = uv run python -c "import sys;print(sys.version.split(' ')[0])"
           $VERSION = uv run python -c "from src.main import VERSION;print(VERSION)"
           

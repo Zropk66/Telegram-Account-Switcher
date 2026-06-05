@@ -78,7 +78,6 @@ class TASApp:
         global _cleanup_done
         _cleanup_done.clear()
         register_signal_handlers()
-        sys.excepthook = handle_global_exception
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -175,16 +174,26 @@ def handle_global_exception(exc_type, exc_value, exc_traceback):
     """处理全局异常。"""
     if exc_type in (KeyboardInterrupt, SystemExit):
         sys.exit(0)
+
     if logger:
         logger.exception(
             "捕获到未处理异常, 请尝试重启程序或联系开发者.",
             exc_value,
             popup=True,
         )
+        return
+
+    # 兜底：logger 尚未初始化时使用 Windows 原生 MessageBox
+    import traceback
+    import ctypes
+    tb_text = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+    error_msg = f"捕获到未处理异常, 请尝试重启程序或联系开发者.\n\n{tb_text}"
+    ctypes.windll.user32.MessageBoxW(0, error_msg, "TAS - 未处理异常", 0x10)
 
 
 def main():
     """程序主入口。"""
+    sys.excepthook = handle_global_exception
     try:
         with SingleInstanceLock.ensure_single_instance():
             global logger, CONFIG

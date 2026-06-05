@@ -4,6 +4,7 @@ import sys
 from PySide6.QtCore import Slot
 from PySide6.QtWidgets import QWidget, QApplication, QTableWidgetItem, QHeaderView, QTableWidget, QAbstractItemView
 
+from src.core.logger import Logger
 from src.ui.ui_help import Ui_help
 
 
@@ -60,4 +61,4 @@ class HelpWindow(QWidget):
     @Slot()
     def double_click_event(self, event):
         """处理双击事件。"""
-        print(f'{event.row()} 行, {event.column()} 列被双击了. 数据 -> "{event.data()}".')
+        Logger.get_instance().debug(f'{event.row()} 行, {event.column()} 列被双击了. 数据 -> "{event.data()}".')

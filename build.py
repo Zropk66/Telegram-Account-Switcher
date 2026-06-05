@@ -2,57 +2,65 @@
 import subprocess
 import sys
 import time
+from typing import List
 
 from main import VERSION
 
 TOOLCHAIN = ["mingw64", "msvc"][0]
-BUILD_MODE = ["release", "debug"][0]
+BUILD_MODE = ["release", "preview", "debug"][0]
 
 
-def build_args() -> list[str]:
+def build_args(build_mode, toolchain) -> list[str]:
     args = []
 
-    if TOOLCHAIN == "mingw64":
+    if toolchain == "mingw64":
         args.append("--mingw64")
-    elif TOOLCHAIN == "msvc":
+    elif toolchain == "msvc":
         args.append("--msvc=latest")
     else:
-        raise ValueError(f"Unsupported TOOLCHAIN: {TOOLCHAIN}")
+        raise ValueError(f"Unsupported TOOLCHAIN: {toolchain}")
 
     common_args = [
-        "--standalone",
+        "--onefile",
         "--plugin-enable=pyside6",
-        f"--output-filename=TAS_{BUILD_MODE}_{TOOLCHAIN}_v{VERSION}",
+        f"--output-filename=TAS_{build_mode}_{toolchain}_v{VERSION}",
         "--output-dir=output",
         "--show-progress",
         "--jobs=8",
+        "--windows-company-name=Company",
         "--windows-product-name=TAS",
         f"--windows-product-version={VERSION}",
         f"--windows-file-version={VERSION}",
+        f"--plugin-enable=anti-bloat",
         "--windows-file-description=Telegram Account Switcher",
     ]
     args.extend(common_args)
-
-    if BUILD_MODE == "release":
+    if build_mode == "debug":
+        args.extend(["--show-memory"])
+    elif build_mode == "preview":
         args.extend([
-            "--windows-console-mode=disable",
-            "--onefile",
+            "--deployment",
             "--remove-output",
             "--lto=yes"
         ])
-    elif BUILD_MODE == "debug":
-        args.extend("--show-memory")
+    elif build_mode == "release":
+        args.extend([
+            "--windows-console-mode=disable",
+            "--deployment",
+            "--remove-output",
+            "--lto=yes"
+        ])
     else:
-        raise ValueError(f"Unsupported BUILD_MODE: {BUILD_MODE}")
+        raise ValueError(f"Unsupported BUILD_MODE: {build_mode}")
     args.append(".\\launcher.py")
     return args
 
 
-def main() -> int:
-    print(f"Build mode: {BUILD_MODE}")
-    print(f"Toolchain: {TOOLCHAIN}")
+def run_build(build_mode, toolchain) -> int:
+    print(f"Build mode: {build_mode}")
+    print(f"Toolchain: {toolchain}")
 
-    args = build_args()
+    args = build_args(build_mode, toolchain)
     command = ["nuitka"] + args
     print("Command:")
     print(" ".join(command))
@@ -60,7 +68,17 @@ def main() -> int:
     subprocess.run(command, shell=True, check=True)
     print(f"\nBuild finished in {time.time() - start_time:.2f} seconds")
 
-    return 1
+    return 0
+
+
+def main() -> int:
+    if isinstance(BUILD_MODE, list):
+        for mode in BUILD_MODE:
+            run_build(mode, TOOLCHAIN)
+    else:
+        run_build(BUILD_MODE, TOOLCHAIN)
+
+    return 0
 
 
 if __name__ == "__main__":
