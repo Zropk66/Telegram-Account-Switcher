@@ -8,11 +8,9 @@
 ## WARNING! All changes made in this file will be lost when recompiling UI file!
 ################################################################################
 
-from PySide6.QtCore import (QCoreApplication, QMetaObject, QRect,
-                            QSize)
-from PySide6.QtWidgets import (QCheckBox, QLabel, QLineEdit,
-                               QListWidget, QPushButton,
-                               QSizePolicy, QWidget)
+from PySide6.QtCore import QCoreApplication, QMetaObject, QRect, QSize
+from PySide6.QtWidgets import QCheckBox, QLabel, QLineEdit, QListWidget, QPushButton, QSizePolicy, QWidget
+
 
 class Ui_setting(object):
     def setupUi(self, setting):

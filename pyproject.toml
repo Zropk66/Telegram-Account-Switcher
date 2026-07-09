@@ -33,4 +33,5 @@ packages = ["src"]
 [dependency-groups]
 dev = [
     "pyfakefs>=6.2.0",
+    "ruff>=0.15.16",
 ]

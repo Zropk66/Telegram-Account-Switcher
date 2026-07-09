@@ -1,15 +1,16 @@
-"""命令行帮助窗口。"""
+"""命令行帮助窗口."""
+
 import sys
 
-from PySide6.QtCore import Slot
-from PySide6.QtWidgets import QWidget, QApplication, QTableWidgetItem, QHeaderView, QTableWidget, QAbstractItemView
+from PySide6.QtCore import QModelIndex, Slot
+from PySide6.QtWidgets import QAbstractItemView, QApplication, QHeaderView, QTableWidget, QTableWidgetItem, QWidget
 
 from src.core.logger import Logger
 from src.ui.ui_help import Ui_help
 
 
-def open_help_window(version):
-    """打开帮助窗口。"""
+def open_help_window(version: str) -> None:
+    """打开帮助窗口."""
     app = QApplication.instance() or QApplication(sys.argv)
     widget = HelpWindow(version)
     widget.show()
@@ -17,10 +18,10 @@ def open_help_window(version):
 
 
 class HelpWindow(QWidget):
-    """帮助窗口。"""
+    """帮助窗口."""
 
-    def __init__(self, version):
-        """初始化窗口。"""
+    def __init__(self, version: str) -> None:
+        """初始化窗口."""
         super().__init__()
         self.version = version
         self.ui = Ui_help()
@@ -35,10 +36,10 @@ class HelpWindow(QWidget):
             ("--encrypt", "-e", "立即加密文件"),
             ("--decrypt", "-d", "立即解密文件"),
             ("--key-login", "-k", "强制使用key绕过目录锁定直接登录"),
-            ("--tag", "-t", "指定操作特定标签账户")
+            ("--tag", "-t", "指定操作特定标签账户"),
         ]
 
-        self.ui.version_label.setText(f'TAS v{self.version}')
+        self.ui.version_label.setText(f"TAS v{self.version}")
 
         self.ui.args_widget.setRowCount(len(self.help_datas))
         for row, (long_opt, short_opt, desc) in enumerate(self.help_datas):
@@ -59,6 +60,6 @@ class HelpWindow(QWidget):
         self.ui.args_widget.setEditTriggers(QTableWidget.NoEditTriggers)
 
     @Slot()
-    def double_click_event(self, event):
-        """处理双击事件。"""
+    def double_click_event(self, event: QModelIndex) -> None:
+        """处理双击事件."""
         Logger.get_instance().debug(f'{event.row()} 行, {event.column()} 列被双击了. 数据 -> "{event.data()}".')

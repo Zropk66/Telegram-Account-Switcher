@@ -8,11 +8,10 @@
 ## WARNING! All changes made in this file will be lost when recompiling UI file!
 ################################################################################
 
-from PySide6.QtCore import (QCoreApplication, QMetaObject, QRect,
-                            Qt)
-from PySide6.QtGui import (QFont)
-from PySide6.QtWidgets import (QAbstractItemView, QLabel,
-                               QTableWidget, QTableWidgetItem)
+from PySide6.QtCore import QCoreApplication, QMetaObject, QRect, Qt
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import QAbstractItemView, QLabel, QTableWidget, QTableWidgetItem
+
 
 class Ui_help(object):
     def setupUi(self, help):

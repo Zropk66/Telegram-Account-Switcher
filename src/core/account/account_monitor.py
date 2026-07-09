@@ -1,40 +1,38 @@
-"""
-账户运行监控。
-"""
+"""账户运行监控."""
 
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Callable, Optional
 
 import psutil
-from watchdog.events import FileSystemEventHandler
+from watchdog.events import FileMovedEvent, FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 from src.core.account.account_operations import restore_default
 from src.core.config import ConfigService
 from src.core.constants import (
     MONITOR_MTIME_CHECK_INTERVAL,
+    MONITOR_SESSION_MIN_DURATION,
     TDATA_DIR,
-    TELEGRAM_IDENTITY_KEY,
     TELEGRAM_CONFIGS_SUBPATH,
-    MONITOR_SESSION_MIN_DURATION
+    TELEGRAM_IDENTITY_KEY,
 )
 from src.core.logger import Logger
 
 
 class _ConfigsFileHandler(FileSystemEventHandler):
-    """监控配置文件变化。"""
+    """监控配置文件变化."""
 
-    def __init__(self, target_file: Path, wake_event: threading.Event, login_flag: list):
-        """初始化配置文件事件处理器。"""
+    def __init__(self, target_file: Path, wake_event: threading.Event, login_flag: list) -> None:
+        """初始化配置文件事件处理器."""
         super().__init__()
         self._target_name = target_file.name
         self._wake_event = wake_event
         self._login_flag = login_flag
 
-    def _match(self, event) -> bool:
-        """检查事件是否匹配目标配置文件。"""
+    def _match(self, event: FileSystemEvent) -> bool:
+        """检查事件是否匹配目标配置文件."""
         if event.is_directory:
             return False
         try:
@@ -42,26 +40,26 @@ class _ConfigsFileHandler(FileSystemEventHandler):
         except (ValueError, OSError):
             return False
 
-    def _on_file_event(self, event):
-        """处理匹配的文件事件。"""
+    def _on_file_event(self, event: FileSystemEvent) -> None:
+        """处理匹配的文件事件."""
         if self._match(event):
             self._login_flag[0] = True
             self._wake_event.set()
 
-    def on_modified(self, event):
-        """文件修改事件回调。"""
+    def on_modified(self, event: FileSystemEvent) -> None:
+        """文件修改事件回调."""
         self._on_file_event(event)
 
-    def on_created(self, event):
-        """文件创建事件回调。"""
+    def on_created(self, event: FileSystemEvent) -> None:
+        """文件创建事件回调."""
         self._on_file_event(event)
 
-    def on_deleted(self, event):
-        """文件删除事件回调。"""
+    def on_deleted(self, event: FileSystemEvent) -> None:
+        """文件删除事件回调."""
         self._on_file_event(event)
 
-    def on_moved(self, event):
-        """文件重命名或移动事件回调。"""
+    def on_moved(self, event: FileMovedEvent) -> None:
+        """文件重命名或移动事件回调."""
         if not event.is_directory:
             try:
                 if Path(event.dest_path).name == self._target_name:
@@ -72,13 +70,19 @@ class _ConfigsFileHandler(FileSystemEventHandler):
 
 
 class AccountMonitor:
-    """账户退出与登录监控器。"""
+    """账户退出与登录监控器."""
 
     _MTIME_CHECK_INTERVAL = MONITOR_MTIME_CHECK_INTERVAL
 
-    def __init__(self, tag: str, check_tag: str | None, config_manage: ConfigService, logger: Logger,
-                 spawn_time: datetime | None = None):
-        """初始化账户监控器。"""
+    def __init__(
+        self,
+        tag: str,
+        check_tag: str | None,
+        config_manage: ConfigService,
+        logger: Logger,
+        spawn_time: datetime | None = None,
+    ) -> None:
+        """初始化账户监控器."""
         self.tag = tag
         self.check_tag = check_tag
         self.config = config_manage
@@ -95,22 +99,22 @@ class AccountMonitor:
         self._completion_callbacks: list[Callable[[bool, str], None]] = []
 
     def register_on_login(self, callback: Callable[[str], None]) -> None:
-        """注册登录成功回调。"""
+        """注册登录成功回调."""
         if callback not in self._login_callbacks:
             self._login_callbacks.append(callback)
 
     def register_on_completion(self, callback: Callable[[bool, str], None]) -> None:
-        """注册监控完成回调。"""
+        """注册监控完成回调."""
         if callback not in self._completion_callbacks:
             self._completion_callbacks.append(callback)
 
     def handle_process_status(self, is_alive: bool, pid: Optional[int] = None) -> None:
-        """处理进程存活状态变更。"""
+        """处理进程存活状态变更."""
         self._process_alive = is_alive
         self._wake_event.set()
 
     def _check_mtime(self) -> bool:
-        """通过修改时间辅助检测登录状态。"""
+        """通过修改时间辅助检测登录状态."""
         try:
             if self.configs_file.exists():
                 return self.configs_file.stat().st_mtime >= self.spawn_time.timestamp()
@@ -118,16 +122,13 @@ class AccountMonitor:
             pass
         return False
 
-    def run(self):
-        """运行监控主线程。"""
+    def run(self) -> None:
+        """运行监控主线程."""
         is_logged_in = False
         monitor_started = False
 
         try:
-            self._process_alive = any(
-                p.info['name'] == self.config.client
-                for p in psutil.process_iter(['name'])
-            )
+            self._process_alive = any(p.info["name"] == self.config.client for p in psutil.process_iter(["name"]))
         except Exception as e:
             self.logger.warning(f"初始化检查进程存活状态时发生异常: {e}")
             self._process_alive = True
@@ -173,7 +174,7 @@ class AccountMonitor:
                                 self.logger.info(f"正在备份账户密钥：{self.tag}")
                                 self.config.backup_account_keys(self.tag, Path(self.config.path) / TDATA_DIR)
 
-                        self.logger.debug(f"正在恢复默认账户状态...")
+                        self.logger.debug("正在恢复默认账户状态...")
                         restore_default()
                     break
         except Exception as e:

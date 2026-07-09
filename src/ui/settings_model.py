@@ -1,62 +1,62 @@
-"""账户列表数据模型。"""
+"""账户列表数据模型."""
 
-from typing import Dict, Any
+from typing import Any, Callable, Dict
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QListWidgetItem, QListWidget
+from PySide6.QtWidgets import QListWidget, QListWidgetItem
 
 from src.core.config import ConfigService
 
 
 class AccountListModel:
-    """账户列表界面数据模型。"""
+    """账户列表界面数据模型."""
 
-    def __init__(self, list_widget: QListWidget, config: ConfigService):
-        """初始化账户列表数据模型。"""
+    def __init__(self, list_widget: QListWidget, config: ConfigService) -> None:
+        """初始化账户列表数据模型."""
         self.list_widget = list_widget
         self.config = config
 
-    def load_from_config(self):
-        """从配置文件中加载账户数据到列表中。"""
+    def load_from_config(self) -> None:
+        """从配置文件中加载账户数据到列表中."""
         self.list_widget.clear()
         tags_data = self.config.get_all_accounts()
         for tag_name, account_data in tags_data.items():
             data = account_data.copy()
-            data['tag'] = tag_name
+            data["tag"] = tag_name
             item = QListWidgetItem("")
             item.setData(Qt.UserRole, data)
             self.list_widget.addItem(item)
         self.refresh_display()
 
-    def sync_to_config(self):
-        """同步数据到配置文件。"""
+    def sync_to_config(self) -> None:
+        """同步数据到配置文件."""
         new_tags = {}
         for row in range(self.list_widget.count()):
             item = self.list_widget.item(row)
             data = item.data(Qt.UserRole)
             if data:
-                tag_name = data.get('tag', '')
+                tag_name = data.get("tag", "")
                 account_data = {
-                    'id': data.get('id', ''),
-                    'folder': data.get('folder', ''),
-                    'info': data.get('info', ''),
-                    'identity': data.get('identity', ''),
-                    'key': data.get('key', '')
+                    "id": data.get("id", ""),
+                    "folder": data.get("folder", ""),
+                    "info": data.get("info", ""),
+                    "identity": data.get("identity", ""),
+                    "key": data.get("key", ""),
                 }
                 new_tags[tag_name] = account_data
 
         self.config.tags = new_tags
         self.refresh_display()
 
-    def add_account(self, data: Dict[str, Any]):
-        """向列表中追加账户数据。"""
+    def add_account(self, data: Dict[str, Any]) -> None:
+        """向列表中追加账户数据."""
         item = QListWidgetItem("")
         item.setData(Qt.UserRole, data)
         self.list_widget.addItem(item)
         self.sync_to_config()
 
-    def remove_current(self, sync_callback=None) -> bool:
-        """移除选定账户。"""
+    def remove_current(self, sync_callback: Callable = None) -> bool:
+        """移除选定账户."""
         item = self.list_widget.currentItem()
         if item:
             row = self.list_widget.row(item)
@@ -67,21 +67,21 @@ class AccountListModel:
             return True
         return False
 
-    def update_item(self, item: QListWidgetItem, data: Dict[str, Any]):
-        """更新列表中指定行的数据。"""
+    def update_item(self, item: QListWidgetItem, data: Dict[str, Any]) -> None:
+        """更新列表中指定行的数据."""
         item.setData(Qt.UserRole, data)
         self.sync_to_config()
 
-    def refresh_display(self, default_tag: str = None):
-        """刷新列表中各账户行的文本显示。"""
+    def refresh_display(self, default_tag: str = None) -> None:
+        """刷新列表中各账户行的文本显示."""
         if not default_tag:
             default_tag = self.config.default
         for row in range(self.list_widget.count()):
             item = self.list_widget.item(row)
             data = item.data(Qt.UserRole)
             if data:
-                tag = data.get('tag', '')
-                id_val = str(data.get('id', ''))
+                tag = data.get("tag", "")
+                id_val = str(data.get("id", ""))
                 display_text = tag if tag else id_val
                 if (tag and tag == default_tag) or (not tag and id_val == default_tag):
                     display_text += " [默认]"

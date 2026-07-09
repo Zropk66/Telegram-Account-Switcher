@@ -1,6 +1,4 @@
-"""
-系统全局常量与配置默认值定义。
-"""
+"""系统全局常量与配置默认值定义."""
 
 # --- 应用元数据 ---
 APP_TITLE = "TAS"
@@ -30,10 +28,10 @@ MONITOR_MTIME_CHECK_INTERVAL = 2.0
 MONITOR_SESSION_MIN_DURATION = 60.0
 
 # --- 密码学常数与不变量 ---
-GCM_MARKER = b'\x47\x43\x4d'
+GCM_MARKER = b"\x47\x43\x4d"
 NONCE_SIZE = 12
 TAG_SIZE = 16
 LOCAL_ITER_NO_PWD = 4
 LOCAL_ITER_WITH_PWD = 400
 STRONG_ITER_COUNT = 100000
-TDF_MAGIC = b'TDF$'
+TDF_MAGIC = b"TDF$"

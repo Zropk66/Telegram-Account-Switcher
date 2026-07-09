@@ -1,37 +1,39 @@
-"""命令行控制器。"""
+"""命令行控制器."""
+
 import argparse
 import sys
 from enum import Enum
 from pathlib import Path
-from typing import Optional, Tuple, Callable
+from typing import Callable, Optional, Tuple
 
 from src.core import AESCipher
 from src.core.config import ConfigService
-from src.core.constants import APP_VERSION, APP_TITLE, KEY_FOLDER
+from src.core.constants import APP_TITLE, APP_VERSION, KEY_FOLDER
 from src.core.exceptions import TASConfigException
 from src.core.logger import Logger
 from src.core.utils import search_file_in_dirs
 
 
 class CLIAction(Enum):
-    """命令行操作类型。"""
-    CONTINUE = "continue"      # 无 CLI 操作，继续主流程
-    EXIT = "exit"              # 已处理 CLI 操作，安全退出
-    SHOW_HELP = "show_help"    # 需展示帮助界面
+    """命令行操作类型."""
+
+    CONTINUE = "continue"  # 无 CLI 操作，继续主流程
+    EXIT = "exit"  # 已处理 CLI 操作，安全退出
+    SHOW_HELP = "show_help"  # 需展示帮助界面
     SHOW_SETTINGS = "show_settings"  # 需展示设置界面
 
 
 class CLIController:
-    """命令行控制器。"""
+    """命令行控制器."""
 
     def __init__(
-            self,
-            version: str = APP_VERSION,
-            config: Optional[ConfigService] = None,
-            logger: Optional[Logger] = None,
-            cipher_factory: Optional[Callable[[str], AESCipher]] = None
-    ):
-        """初始化命令行控制器。"""
+        self,
+        version: str = APP_VERSION,
+        config: Optional[ConfigService] = None,
+        logger: Optional[Logger] = None,
+        cipher_factory: Optional[Callable[[str], AESCipher]] = None,
+    ) -> None:
+        """初始化命令行控制器."""
         self.version = version
         self.config = config or ConfigService()
         self.logger = logger or Logger()
@@ -39,7 +41,7 @@ class CLIController:
 
     @staticmethod
     def parse_args() -> argparse.Namespace:
-        """解析命令行参数。"""
+        """解析命令行参数."""
         parser = argparse.ArgumentParser(description=f"{APP_TITLE} CLI", add_help=False, exit_on_error=False)
 
         action_group = parser.add_argument_group()
@@ -58,7 +60,7 @@ class CLIController:
         return parser.parse_args()
 
     def check_config(self, args: argparse.Namespace) -> bool:
-        """校验运行配置。"""
+        """校验运行配置."""
         try:
             self.config.sync_all_account_paths()
 
@@ -86,7 +88,7 @@ class CLIController:
             return False
 
     def _apply_args(self, args: argparse.Namespace) -> Optional[str]:
-        """应用命令行参数到配置。"""
+        """应用命令行参数到配置."""
         if args.password:
             self.config.pwd = args.password
 
@@ -99,7 +101,7 @@ class CLIController:
         return None
 
     def _validate_tag(self, tag: str) -> str:
-        """验证标签有效性。"""
+        """验证标签有效性."""
         if tag == self.config.default:
             return tag
 
@@ -117,7 +119,7 @@ class CLIController:
         return tag
 
     def handle_actions(self, args: argparse.Namespace) -> CLIAction:
-        """根据解析结果返回执行意图。"""
+        """根据解析结果返回执行意图."""
         if args.help:
             return CLIAction.SHOW_HELP
         elif args.version:
@@ -142,7 +144,7 @@ class CLIController:
         return CLIAction.CONTINUE
 
     def _process_tags(self, operation: str) -> None:
-        """批量处理所有标签的加密或解密操作。"""
+        """批量处理所有标签的加密或解密操作."""
         if not self.config.pwd:
             self._handle_error("未指定密钥.")
             sys.exit()
@@ -179,7 +181,7 @@ class CLIController:
         self._handle_info(msg)
 
     def _process_single_tag(self, tag: str, operation: str) -> None:
-        """处理单个标签的加密或解密操作。"""
+        """处理单个标签的加密或解密操作."""
         if not self.config.pwd:
             self._handle_error("未指定密钥.")
             sys.exit()
@@ -189,7 +191,7 @@ class CLIController:
             sys.exit()
 
         if tag == self.config.default:
-            self._handle_warning(f"标签 '{tag}' 为默认账户，禁止操作。")
+            self._handle_warning(f"标签 '{tag}' 为默认账户，禁止操作.")
             return
 
         cipher = self._cipher_factory(self.config.pwd)
@@ -200,12 +202,12 @@ class CLIController:
             self._handle_info(f"标签 '{tag}' {op_name}成功")
         else:
             if reason == "已加密":
-                self._handle_warning(f"标签 '{tag}' 已加密，跳过。")
+                self._handle_warning(f"标签 '{tag}' 已加密，跳过.")
             else:
                 self._handle_error(f"标签 '{tag}' 操作失败: {reason}")
 
     def _process_tag(self, tag: str, operation: str, cipher: AESCipher) -> Tuple[bool, Optional[str]]:
-        """执行单个标签的实际加密或解密操作。"""
+        """执行单个标签的实际加密或解密操作."""
         tag_path = self.config.get_account(tag).get("folder")
         if not tag_path or not (Path(self.config.path) / tag_path).is_dir():
             tag_path = search_file_in_dirs(self.config.path, tag)
@@ -231,13 +233,13 @@ class CLIController:
             return False, str(e)
 
     def _handle_info(self, message: str) -> None:
-        """处理普通信息消息。"""
+        """处理普通信息消息."""
         self.logger.info(message, popup=True)
 
     def _handle_warning(self, message: str) -> None:
-        """处理警告消息。"""
+        """处理警告消息."""
         self.logger.warning(message, popup=True)
 
     def _handle_error(self, message: str) -> None:
-        """处理错误消息。"""
+        """处理错误消息."""
         self.logger.error(message, popup=True)

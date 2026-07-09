@@ -1,8 +1,8 @@
-"""打包脚本"""
+"""打包脚本."""
+
 import subprocess
 import sys
 import time
-from typing import List
 
 from main import VERSION
 
@@ -10,7 +10,8 @@ TOOLCHAIN = ["mingw64", "msvc"][0]
 BUILD_MODE = ["release", "preview", "debug"][0]
 
 
-def build_args(build_mode, toolchain) -> list[str]:
+def build_args(build_mode: str, toolchain: str) -> list[str]:
+    """构建参数."""
     args = []
 
     if toolchain == "mingw64":
@@ -31,32 +32,23 @@ def build_args(build_mode, toolchain) -> list[str]:
         "--windows-product-name=TAS",
         f"--windows-product-version={VERSION}",
         f"--windows-file-version={VERSION}",
-        f"--plugin-enable=anti-bloat",
         "--windows-file-description=Telegram Account Switcher",
     ]
     args.extend(common_args)
     if build_mode == "debug":
         args.extend(["--show-memory"])
     elif build_mode == "preview":
-        args.extend([
-            "--deployment",
-            "--remove-output",
-            "--lto=yes"
-        ])
+        args.extend(["--deployment", "--remove-output", "--lto=yes"])
     elif build_mode == "release":
-        args.extend([
-            "--windows-console-mode=disable",
-            "--deployment",
-            "--remove-output",
-            "--lto=yes"
-        ])
+        args.extend(["--windows-console-mode=disable", "--deployment", "--remove-output", "--lto=yes"])
     else:
         raise ValueError(f"Unsupported BUILD_MODE: {build_mode}")
     args.append(".\\launcher.py")
     return args
 
 
-def run_build(build_mode, toolchain) -> int:
+def run_build(build_mode: str, toolchain: str) -> int:
+    """运行构建命令."""
     print(f"Build mode: {build_mode}")
     print(f"Toolchain: {toolchain}")
 
@@ -72,6 +64,7 @@ def run_build(build_mode, toolchain) -> int:
 
 
 def main() -> int:
+    """主函数."""
     if isinstance(BUILD_MODE, list):
         for mode in BUILD_MODE:
             run_build(mode, TOOLCHAIN)

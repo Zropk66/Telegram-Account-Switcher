@@ -1,4 +1,4 @@
-"""账户管理模块入口。"""
+"""账户管理模块入口."""
 
-from .account_operations import *
-from .account_switcher import *
+from .account_operations import *  # noqa: F403
+from .account_switcher import *  # noqa: F403

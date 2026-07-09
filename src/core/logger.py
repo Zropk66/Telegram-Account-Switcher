@@ -1,12 +1,14 @@
-"""
-日志模块。
-"""
+"""日志模块."""
+
 import sys
 import threading
 from contextlib import suppress
-from typing import Any, Callable, Optional, Protocol
+from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol
 
 from loguru import logger as loguru_logger
+
+if TYPE_CHECKING:
+    from loguru import Message
 
 PopupHandler = Callable[[str, str, str], None]
 
@@ -15,18 +17,18 @@ _exception_level_registered = False
 
 
 class ConfigProvider(Protocol):
-    """配置读取接口。"""
+    """配置读取接口."""
 
-    def get(self, key: str, default: Any = None) -> Any:
-        """获取配置项的值。"""
+    def get(self, key: str, default: Any = None) -> Any:  # noqa: ANN401
+        """获取配置项的值."""
         ...
 
 
 class DefaultConfigProvider(ConfigProvider):
-    """默认配置实现。"""
+    """默认配置实现."""
 
-    def get(self, key: str, default: Any = None) -> Any:
-        """获取配置值。"""
+    def get(self, key: str, default: Any = None) -> Any:  # noqa: ANN401
+        """获取配置值."""
         return default
 
 
@@ -34,29 +36,29 @@ _config_provider: ConfigProvider = DefaultConfigProvider()
 
 
 def set_config_provider(provider: ConfigProvider) -> None:
-    """注入配置提供者。"""
+    """注入配置提供者."""
     global _config_provider
     _config_provider = provider
 
 
 def set_popup_handler(handler: Optional[PopupHandler]) -> None:
-    """设置弹窗处理器。"""
+    """设置弹窗处理器."""
     _popup_state["handler"] = handler
 
 
 def reset_logger_state() -> None:
-    """重置全局日志状态。"""
+    """重置全局日志状态."""
     global _config_provider
     Logger.reset_instance()
     _popup_state["handler"] = None
     _config_provider = DefaultConfigProvider()
 
 
-def _setup_popup_bridge():
-    """桥接日志流到UI弹窗。"""
+def _setup_popup_bridge() -> None:
+    """桥接日志流到UI弹窗."""
 
-    def popup_sink(message):
-        """发送日志弹窗。"""
+    def popup_sink(message: "Message") -> None:
+        """发送日志弹窗."""
         extra = message.record.get("extra", {})
         if not extra.get("popup", False):
             return
@@ -87,12 +89,13 @@ def _setup_popup_bridge():
 
 
 class Logger:
-    """日志管理器。"""
+    """日志管理器."""
+
     _instance = None
     _lock = threading.Lock()
 
-    def __new__(cls, *args, **kwargs):
-        """实现日志单例。"""
+    def __new__(cls, *args: Any, **kwargs: Any) -> "Logger":  # noqa: ANN401
+        """实现日志单例."""
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
@@ -102,18 +105,18 @@ class Logger:
 
     @classmethod
     def get_instance(cls) -> "Logger":
-        """获取日志单例。"""
+        """获取日志单例."""
         return cls()
 
     @classmethod
     def reset_instance(cls) -> None:
-        """释放日志单例。"""
+        """释放日志单例."""
         loguru_logger.remove()
         cls._instance = None
 
     @staticmethod
-    def _init_logger():
-        """初始化日志配置。"""
+    def _init_logger() -> None:
+        """初始化日志配置."""
         global _exception_level_registered
         loguru_logger.remove()
 
@@ -123,9 +126,7 @@ class Logger:
                 _exception_level_registered = True
 
         log_format = (
-            "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
-            "<level>{level: <8}</level> | "
-            "<level>{message}</level>"
+            "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <level>{message}</level>"
         )
 
         if sys.stderr is not None:
@@ -142,32 +143,38 @@ class Logger:
         _setup_popup_bridge()
 
     @staticmethod
-    def log(level: str, message: str, popup: bool = False, **kwargs) -> None:
-        """记录日志。"""
+    def log(level: str, message: str, popup: bool = False, **kwargs: Any) -> None:  # noqa: ANN401
+        """记录日志."""
         exc = kwargs.pop("exc", None)
         loguru_logger.opt(exception=exc, depth=2).bind(popup=popup, **kwargs).log(level, message)
 
-    def debug(self, message, popup=False, **kwargs):
-        """记录调试日志。"""
+    def debug(self, message: str, popup: bool = False, **kwargs: Any) -> None:  # noqa: ANN401
+        """记录调试日志."""
         self.log("DEBUG", message, popup, **kwargs)
 
-    def info(self, message, popup=False, **kwargs):
-        """记录普通日志。"""
+    def info(self, message: str, popup: bool = False, **kwargs: Any) -> None:  # noqa: ANN401
+        """记录普通日志."""
         self.log("INFO", message, popup, **kwargs)
 
-    def warning(self, message, popup=False, **kwargs):
-        """记录警告日志。"""
+    def warning(self, message: str, popup: bool = False, **kwargs: Any) -> None:  # noqa: ANN401
+        """记录警告日志."""
         self.log("WARNING", message, popup, **kwargs)
 
-    def error(self, message, popup=False, **kwargs):
-        """记录错误日志。"""
+    def error(self, message: str, popup: bool = False, **kwargs: Any) -> None:  # noqa: ANN401
+        """记录错误日志."""
         self.log("ERROR", message, popup, **kwargs)
 
-    def critical(self, message, popup=False, **kwargs):
-        """记录严重错误日志。"""
+    def critical(self, message: str, popup: bool = False, **kwargs: Any) -> None:  # noqa: ANN401
+        """记录严重错误日志."""
         self.log("CRITICAL", message, popup, **kwargs)
 
-    def exception(self, message, exc, popup=False, **kwargs):
-        """记录异常日志。"""
+    def exception(
+        self,
+        message: str,
+        exc: Optional[BaseException],
+        popup: bool = False,
+        **kwargs: Any,  # noqa: ANN401
+    ) -> None:
+        """记录异常日志."""
         kwargs["exc"] = exc
         self.log("EXCEPTION", message, popup, **kwargs)

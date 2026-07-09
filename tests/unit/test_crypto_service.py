@@ -1,6 +1,7 @@
 """
 AccountDataCryptoService 与 Telegram 底层解密功能单元测试。
 """
+
 import hashlib
 from pathlib import Path
 from unittest.mock import patch
@@ -8,35 +9,35 @@ from unittest.mock import patch
 import pytest
 
 from src.core.crypto_service import (
+    LOCAL_ITER_NO_PWD,
+    LOCAL_ITER_WITH_PWD,
+    STRONG_ITER_COUNT,
     AccountDataCryptoService,
-    create_local_key,
+    CryptoException,
+    RawTdfFile,
     create_legacy_local_key,
+    create_local_key,
+    decrypt_key_data_tdf,
     decrypt_local,
     prepare_aes_old_mtp,
-    decrypt_key_data_tdf,
-    RawTdfFile,
-    CryptoException,
-    STRONG_ITER_COUNT,
-    LOCAL_ITER_WITH_PWD,
-    LOCAL_ITER_NO_PWD
 )
 
 
 def test_decrypt_accounts_exception_safety():
     """验证 decrypt_accounts 遇到任何异常时都能安全捕获并返回空列表，避免崩溃。"""
-    with patch('src.core.crypto_service.decrypt_accounts_internal', side_effect=CryptoException("Test error")):
+    with patch("src.core.crypto_service.decrypt_accounts_internal", side_effect=CryptoException("Test error")):
         result = AccountDataCryptoService.decrypt_accounts(Path("/fake/path"), "passcode")
         assert result == []
 
-    with patch('src.core.crypto_service.decrypt_accounts_internal', side_effect=ValueError("Value error")):
+    with patch("src.core.crypto_service.decrypt_accounts_internal", side_effect=ValueError("Value error")):
         result = AccountDataCryptoService.decrypt_accounts(Path("/fake/path"), "passcode")
         assert result == []
 
-    with patch('src.core.crypto_service.decrypt_accounts_internal', side_effect=RuntimeError("Runtime error")):
+    with patch("src.core.crypto_service.decrypt_accounts_internal", side_effect=RuntimeError("Runtime error")):
         result = AccountDataCryptoService.decrypt_accounts(Path("/fake/path"), "passcode")
         assert result == []
 
-    with patch('src.core.crypto_service.decrypt_accounts_internal', side_effect=Exception("General exception")):
+    with patch("src.core.crypto_service.decrypt_accounts_internal", side_effect=Exception("General exception")):
         result = AccountDataCryptoService.decrypt_accounts(Path("/fake/path"), "passcode")
         assert result == []
 
@@ -53,13 +54,13 @@ class TestTelegramCrypto:
 
         assert len(key) == 256, f"密钥应为 256 字节，实际为 {len(key)} 字节"
 
-        with patch('hashlib.pbkdf2_hmac') as mock_pbkdf2:
+        with patch("hashlib.pbkdf2_hmac") as mock_pbkdf2:
             mock_pbkdf2.return_value = b"x" * 256
             create_local_key(passcode, salt)
 
             mock_pbkdf2.assert_called_once()
             call_args = mock_pbkdf2.call_args
-            assert call_args[0][0] == 'sha512', f"应使用 SHA-512，实际为 {call_args[0][0]}"
+            assert call_args[0][0] == "sha512", f"应使用 SHA-512，实际为 {call_args[0][0]}"
             assert call_args[0][3] == STRONG_ITER_COUNT, f"迭代次数应为 {STRONG_ITER_COUNT}，实际为 {call_args[0][3]}"
             assert call_args[0][4] == 256, f"密钥长度参数应为 256，实际为 {call_args[0][4]}"
 
@@ -71,7 +72,7 @@ class TestTelegramCrypto:
         key = create_local_key(passcode, salt)
         assert len(key) == 256
 
-        with patch('hashlib.pbkdf2_hmac') as mock_pbkdf2:
+        with patch("hashlib.pbkdf2_hmac") as mock_pbkdf2:
             mock_pbkdf2.return_value = b"x" * 256
             create_local_key(passcode, salt)
 
@@ -86,22 +87,26 @@ class TestTelegramCrypto:
         key = create_legacy_local_key(passcode, salt)
         assert len(key) == 256
 
-        with patch('hashlib.pbkdf2_hmac') as mock_pbkdf2:
+        with patch("hashlib.pbkdf2_hmac") as mock_pbkdf2:
             mock_pbkdf2.return_value = b"x" * 256
             create_legacy_local_key(passcode, salt)
 
             mock_pbkdf2.assert_called_once()
             call_args = mock_pbkdf2.call_args
-            assert call_args[0][0] == 'sha1', f"旧版应使用 SHA-1，实际为 {call_args[0][0]}"
-            assert call_args[0][3] == LOCAL_ITER_WITH_PWD, f"有密码时迭代次数应为 {LOCAL_ITER_WITH_PWD}，实际为 {call_args[0][3]}"
+            assert call_args[0][0] == "sha1", f"旧版应使用 SHA-1，实际为 {call_args[0][0]}"
+            assert call_args[0][3] == LOCAL_ITER_WITH_PWD, (
+                f"有密码时迭代次数应为 {LOCAL_ITER_WITH_PWD}，实际为 {call_args[0][3]}"
+            )
             assert call_args[0][4] == 256, f"密钥长度参数应为 256，实际为 {call_args[0][4]}"
 
-        with patch('hashlib.pbkdf2_hmac') as mock_pbkdf2:
+        with patch("hashlib.pbkdf2_hmac") as mock_pbkdf2:
             mock_pbkdf2.return_value = b"x" * 256
             create_legacy_local_key(b"", salt)
 
             mock_pbkdf2.assert_called_once()
-            assert mock_pbkdf2.call_args[0][3] == LOCAL_ITER_NO_PWD, f"无密码时迭代次数应为 {LOCAL_ITER_NO_PWD}，实际为 {mock_pbkdf2.call_args[0][3]}"
+            assert mock_pbkdf2.call_args[0][3] == LOCAL_ITER_NO_PWD, (
+                f"无密码时迭代次数应为 {LOCAL_ITER_NO_PWD}，实际为 {mock_pbkdf2.call_args[0][3]}"
+            )
 
     def test_decrypt_local_integrity_check(self):
         """验证完整性校验失败时拒绝返回错误明文。"""
@@ -111,7 +116,7 @@ class TestTelegramCrypto:
 
         local_key = b"test_local_key_32_bytes_long!!!"
 
-        with patch('src.core.crypto_service.tgcrypto') as mock_tgcrypto:
+        with patch("src.core.crypto_service.tgcrypto") as mock_tgcrypto:
             bad_decrypted = b"bad_decrypted_data_that_will_not_match_msg_key!!!"
             mock_tgcrypto.ige256_decrypt.return_value = bad_decrypted
 
@@ -121,10 +126,10 @@ class TestTelegramCrypto:
             assert str(exc_info.value)
             mock_tgcrypto.ige256_decrypt.assert_called_once()
 
-        with patch('src.core.crypto_service.tgcrypto') as mock_tgcrypto:
+        with patch("src.core.crypto_service.tgcrypto") as mock_tgcrypto:
             actual_data = b"1234567890"
             data_length = len(actual_data) + 4
-            length_bytes = data_length.to_bytes(4, 'little')
+            length_bytes = data_length.to_bytes(4, "little")
             decrypted = length_bytes + actual_data + b"padding"
             correct_msg_key = hashlib.sha1(decrypted).digest()[:16]
 
@@ -152,7 +157,7 @@ class TestTelegramCrypto:
 
         def key_pos(pos, size):
             """获取密钥片段。"""
-            return local_key[pos:pos + size]
+            return local_key[pos : pos + size]
 
         dataA = msg_key + key_pos(x, 32)
         dataB = key_pos(x + 32, 16) + msg_key + key_pos(x + 48, 16)
@@ -179,15 +184,16 @@ class TestTelegramCrypto:
 
         def to_qt_byte_array(data: bytes) -> bytes:
             """转换为 Qt 字节数组。"""
-            return len(data).to_bytes(4, 'big') + data
+            return len(data).to_bytes(4, "big") + data
 
         encrypted_payload = to_qt_byte_array(salt) + to_qt_byte_array(key_encrypted) + to_qt_byte_array(info_encrypted)
         tdf_file = RawTdfFile(version=1, encrypted_data=encrypted_payload)
 
-        with patch('src.core.crypto_service.create_local_key') as mock_new_key, \
-             patch('src.core.crypto_service.create_legacy_local_key') as mock_legacy_key, \
-             patch('src.core.crypto_service.decrypt_local') as mock_decrypt:
-
+        with (
+            patch("src.core.crypto_service.create_local_key") as mock_new_key,
+            patch("src.core.crypto_service.create_legacy_local_key") as mock_legacy_key,
+            patch("src.core.crypto_service.decrypt_local") as mock_decrypt,
+        ):
             mock_new_key.return_value = b"new_pass_key"
             mock_legacy_key.return_value = b"legacy_pass_key"
 
@@ -216,23 +222,22 @@ class TestTelegramCrypto:
 
     def test_parse_raw_tdf(self):
         """验证 parse_raw_tdf 正确识别 TDF$ 魔数并切片出 version 和 encrypted_data。"""
-        from src.core.crypto_service import parse_raw_tdf, CryptoException
+        from src.core.crypto_service import CryptoException, parse_raw_tdf
 
-        magic = b'TDF$'
-        version_bytes = (123).to_bytes(4, 'little')
-        encrypted_data = b'encrypted_payload_content'
-        md5_bytes = b'0123456789abcdef' # 16字节
+        magic = b"TDF$"
+        version_bytes = (123).to_bytes(4, "little")
+        encrypted_data = b"encrypted_payload_content"
+        md5_bytes = b"0123456789abcdef"  # 16字节
         raw_data = magic + version_bytes + encrypted_data + md5_bytes
 
         res = parse_raw_tdf(raw_data)
         assert res.version == 123
         assert res.encrypted_data == encrypted_data
 
-        wrong_magic_data = b'TDF#' + version_bytes + encrypted_data + md5_bytes
-        with pytest.raises(CryptoException, match='魔数不匹配'):
+        wrong_magic_data = b"TDF#" + version_bytes + encrypted_data + md5_bytes
+        with pytest.raises(CryptoException, match="魔数不匹配"):
             parse_raw_tdf(wrong_magic_data)
 
-        short_data = b'TDF$'
-        with pytest.raises(CryptoException, match='数据过短'):
+        short_data = b"TDF$"
+        with pytest.raises(CryptoException, match="数据过短"):
             parse_raw_tdf(short_data)
-

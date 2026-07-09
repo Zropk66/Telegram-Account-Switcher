@@ -1,4 +1,4 @@
-"""配置管理公共入口。"""
+"""配置管理公共入口."""
 
 from src.core.config.config import PathConfig
 from src.core.config.data import ConfigData
