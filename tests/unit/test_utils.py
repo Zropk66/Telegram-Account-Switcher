@@ -1,8 +1,23 @@
 """核心工具单元测试。"""
 
+import os
+
 import pytest
 
 from src.core.utils import safe_rename, search_file_in_dirs
+
+
+def _can_symlink(tmp_path):
+    """检测当前环境是否支持创建软链接。"""
+    target = tmp_path / "probe_target"
+    link = tmp_path / "probe_link"
+    target.mkdir()
+    try:
+        os.symlink("probe_target", str(link), target_is_directory=True)
+        link.unlink()
+        return True
+    except (OSError, NotImplementedError):
+        return False
 
 
 def test_safe_rename_success(tmp_path):
@@ -114,3 +129,22 @@ def test_search_file_in_dirs_no_tas_tag(tmp_path):
 
     result = search_file_in_dirs(base_dir, "my_tag")
     assert result is None
+
+
+def test_search_file_in_dirs_skips_symlink(tmp_path):
+    """验证软链接会被跳过，不将 tdata 链接识别为账户目录。"""
+    if not _can_symlink(tmp_path):
+        pytest.skip("当前环境不支持软链接")
+
+    base_dir = tmp_path / "telegram"
+    base_dir.mkdir()
+
+    account1 = base_dir / "tdata-account1"
+    account1.mkdir()
+    (account1 / "tas_tag").write_text("my_tag", encoding="utf-8")
+
+    tdata_link = base_dir / "tdata"
+    os.symlink("tdata-account1", str(tdata_link), target_is_directory=True)
+
+    result = search_file_in_dirs(base_dir, "my_tag")
+    assert result == "tdata-account1"

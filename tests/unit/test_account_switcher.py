@@ -166,8 +166,8 @@ class TestAccountSwitcher:
             assert result is False
             mock_rollback.assert_called_once()
 
-    def test_rollback_to_default_no_backup(self, mock_config):
-        """验证未交换时回滚不备份并就地恢复默认账户。"""
+    def test_rollback_to_default_calls_restore(self, mock_config):
+        """验证回滚仅调用 restore_default，不执行数据移动。"""
         mock_config.path = "/tmp/test_tas"
         mock_config.default = "default_account"
 
@@ -175,16 +175,15 @@ class TestAccountSwitcher:
 
         from pathlib import Path
         with patch('src.core.account.account_switcher.restore_default') as mock_restore_default, \
-             patch.object(Path, 'exists', return_value=False), \
              patch.object(Path, 'rename') as mock_rename:
 
-            switcher._rollback_to_default(actual_default_folder="tdata-temp123")
+            switcher._rollback_to_default(actual_default_folder="tdata-default")
 
             mock_rename.assert_not_called()
-            mock_restore_default.assert_called_once_with(target_folder="tdata")
+            mock_restore_default.assert_called_once_with(target_folder="tdata-default")
 
     def test_rollback_to_default_none_folder(self, mock_config):
-        """验证缺失默认目录时直接以空目录调用恢复默认。"""
+        """验证缺失默认目录时以 None 调用恢复默认。"""
         mock_config.path = "/tmp/test_tas"
         mock_config.default = "default_account"
 
@@ -192,7 +191,6 @@ class TestAccountSwitcher:
 
         from pathlib import Path
         with patch('src.core.account.account_switcher.restore_default') as mock_restore_default, \
-             patch.object(Path, 'exists', return_value=False), \
              patch.object(Path, 'rename') as mock_rename:
 
             switcher._rollback_to_default(actual_default_folder=None)
@@ -200,8 +198,8 @@ class TestAccountSwitcher:
             mock_rename.assert_not_called()
             mock_restore_default.assert_called_once_with(target_folder=None)
 
-    def test_rollback_to_default_with_backup(self, mock_config):
-        """验证已交换时回滚先备份活跃目录再恢复默认。"""
+    def test_rollback_no_backup_rename(self, mock_config):
+        """验证软链接模式下回滚不执行任何备份重命名操作。"""
         mock_config.path = "/tmp/test_tas"
         mock_config.default = "default_account"
 
@@ -209,12 +207,11 @@ class TestAccountSwitcher:
 
         from pathlib import Path
         with patch('src.core.account.account_switcher.restore_default') as mock_restore_default, \
-             patch.object(Path, 'exists', return_value=True), \
              patch.object(Path, 'rename') as mock_rename, \
              patch('shutil.rmtree') as mock_rmtree:
 
-            switcher._rollback_to_default(actual_default_folder="tdata-temp123")
+            switcher._rollback_to_default(actual_default_folder="tdata-default")
 
-            mock_rename.assert_called_once()
-            mock_restore_default.assert_called_once_with(target_folder="tdata-temp123")
-
+            mock_rename.assert_not_called()
+            mock_rmtree.assert_not_called()
+            mock_restore_default.assert_called_once_with(target_folder="tdata-default")

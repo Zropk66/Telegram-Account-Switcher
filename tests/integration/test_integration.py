@@ -45,7 +45,7 @@ class TestIntegrationAccountSwitch:
             assert mock_process_manager.start_process.call_count == 2
 
     def test_encrypted_account_switch(self, mock_config, mock_logger, mock_process_manager, mock_account_fs):
-        """验证加密账户切换会走文件交换与加解密协作路径。"""
+        """验证加密账户切换会走软链接重指向与加解密协作路径。"""
         mock_config.tags = {
             "account_a": {"id": "a123", "folder": "tdata-account_a", "info": "", "identity": "", "key": ""},
             "account_b": {"id": "b456", "folder": "tdata-account_b", "info": "", "identity": "", "key": ""}
@@ -58,30 +58,33 @@ class TestIntegrationAccountSwitch:
         mock_cipher = MagicMock()
         mock_cipher.is_encrypted.return_value = False
 
+        mock_account_fs.find_account_folder.return_value = "tdata-account_b"
+        mock_account_fs.get_tdata_link_target.return_value = None
+        mock_account_fs.repoint_tdata_link.return_value = True
+
         with patch('src.core.account.account_operations.AESCipher', return_value=mock_cipher), \
              patch('src.core.account.account_operations.find_account_folder', mock_account_fs.find_account_folder), \
-             patch('src.core.account.account_operations.swap_active_tdata_with_target', mock_account_fs.swap_active_tdata_with_target):
+             patch('src.core.account.account_operations.get_tdata_link_target', mock_account_fs.get_tdata_link_target), \
+             patch('src.core.account.account_operations.repoint_tdata_link', mock_account_fs.repoint_tdata_link):
 
             switch_to_tag(max_retries=1, confirm_callback=None)
 
-            mock_account_fs.swap_active_tdata_with_target.assert_called_once()
+            mock_account_fs.repoint_tdata_link.assert_called_once()
 
-    def test_crash_recovery_interrupted_switch(self, mock_config, mock_logger, temp_dir):
-        """验证切换中断后，恢复服务会识别并处理孤立临时目录。"""
+    def test_crash_recovery_migrates_real_tdata(self, mock_config, mock_logger, temp_dir):
+        """验证切换中断后，恢复服务会将遗留实体 tdata 迁移为软链接。"""
         recovery_service = AccountRecoveryService(mock_logger)
         mock_config.path = str(temp_dir)
 
-        tdata_path = temp_dir / "tdata"
-        temp_folder = temp_dir / "tdata-temp-1"
-        temp_folder.mkdir(parents=True, exist_ok=True)
+        tdata_dir = temp_dir / "tdata"
+        tdata_dir.mkdir()
+        (tdata_dir / "tas_tag").write_text("crashed_tag", encoding="utf-8")
 
-        assert not tdata_path.exists()
-        assert temp_folder.exists()
-
-        with patch('pathlib.Path.rename'):
+        with patch('src.core.account.account_services.os.symlink'):
             recovery_service.cleanup_orphan_folders(str(temp_dir))
 
-            mock_logger.warning.assert_called()
+        assert (temp_dir / "tdata-crashed_tag").is_dir()
+        mock_logger.warning.assert_called()
 
     def test_concurrent_switch_prevention(self, mock_config, mock_logger, mock_process_manager):
         """验证切换会话能统一管理进程守护和孤立目录清理。"""

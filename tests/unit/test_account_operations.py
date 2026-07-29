@@ -29,7 +29,8 @@ class TestP0AccountOperations:
         mock_account_fs.find_account_folder.side_effect = lambda _, tag: (
             "tdata-current" if tag == "current_account" else "tdata-default"
         )
-        mock_account_fs.swap_active_tdata_with_target.return_value = True
+        mock_account_fs.get_tdata_link_target.return_value = None
+        mock_account_fs.repoint_tdata_link.return_value = True
 
         from src.core.crypto import AESCipher
         cipher = MagicMock(spec=AESCipher)
@@ -37,7 +38,8 @@ class TestP0AccountOperations:
 
         with patch('src.core.account.account_operations.AESCipher', return_value=cipher), \
              patch('src.core.account.account_operations.find_account_folder', mock_account_fs.find_account_folder), \
-             patch('src.core.account.account_operations.swap_active_tdata_with_target', mock_account_fs.swap_active_tdata_with_target):
+             patch('src.core.account.account_operations.get_tdata_link_target', mock_account_fs.get_tdata_link_target), \
+             patch('src.core.account.account_operations.repoint_tdata_link', mock_account_fs.repoint_tdata_link):
             result = account_operations._account_switch(
                 method="restore",
                 max_retries=1
@@ -45,7 +47,7 @@ class TestP0AccountOperations:
 
         assert result is True
         cipher.encrypt.assert_called_once()
-        assert mock_account_fs.swap_active_tdata_with_target.called
+        assert mock_account_fs.repoint_tdata_link.called
 
     def test_switch_to_target_decrypts(self, mock_config, mock_logger, mock_account_fs):
         """验证切换到目标账户后，触发解密逻辑并更新配置状态。"""
@@ -60,11 +62,13 @@ class TestP0AccountOperations:
         cipher.decrypt.return_value = True
 
         mock_account_fs.find_account_folder.return_value = "tdata-target"
-        mock_account_fs.swap_active_tdata_with_target.return_value = True
+        mock_account_fs.get_tdata_link_target.return_value = None
+        mock_account_fs.repoint_tdata_link.return_value = True
 
         with patch('src.core.account.account_operations.AESCipher', return_value=cipher), \
              patch('src.core.account.account_operations.find_account_folder', mock_account_fs.find_account_folder), \
-             patch('src.core.account.account_operations.swap_active_tdata_with_target', mock_account_fs.swap_active_tdata_with_target):
+             patch('src.core.account.account_operations.get_tdata_link_target', mock_account_fs.get_tdata_link_target), \
+             patch('src.core.account.account_operations.repoint_tdata_link', mock_account_fs.repoint_tdata_link):
             result = account_operations._account_switch(
                 method="target",
                 max_retries=1
@@ -82,14 +86,17 @@ class TestP0AccountOperations:
         mock_config.has_complete_keys.return_value = True
         mock_config.login_with_keys.return_value = True
         mock_config.path = "/tmp/test_tas"
+        mock_config.get_account.return_value = {"id": "123", "folder": "tdata-missing"}
 
         from src.core.crypto import AESCipher
         cipher = MagicMock(spec=AESCipher)
         mock_account_fs.find_account_folder.return_value = None
+        mock_account_fs.repoint_tdata_link.return_value = True
 
         with patch('src.core.account.account_operations.AESCipher', return_value=cipher), \
              patch('src.core.account.account_operations.find_account_folder', mock_account_fs.find_account_folder), \
-             patch('src.core.account.account_operations.swap_active_tdata_with_target', mock_account_fs.swap_active_tdata_with_target):
+             patch('src.core.account.account_operations.get_tdata_link_target', mock_account_fs.get_tdata_link_target), \
+             patch('src.core.account.account_operations.repoint_tdata_link', mock_account_fs.repoint_tdata_link):
             result = account_operations._account_switch(
                 method="target",
                 max_retries=1,
@@ -112,19 +119,21 @@ class TestP0AccountOperations:
         cipher.decrypt.return_value = True
 
         call_count = [0]
-        def mock_swap(*args, **kwargs):
-            """模拟目录交换行为。"""
+        def mock_repoint(*args, **kwargs):
+            """模拟软链接重指向行为。"""
             call_count[0] += 1
             if call_count[0] < 5:
                 raise PermissionError("File locked")
             return True
 
         mock_account_fs.find_account_folder.return_value = "tdata-locked"
-        mock_account_fs.swap_active_tdata_with_target.side_effect = mock_swap
+        mock_account_fs.get_tdata_link_target.return_value = None
+        mock_account_fs.repoint_tdata_link.side_effect = mock_repoint
 
         with patch('src.core.account.account_operations.AESCipher', return_value=cipher), \
              patch('src.core.account.account_operations.find_account_folder', mock_account_fs.find_account_folder), \
-             patch('src.core.account.account_operations.swap_active_tdata_with_target', mock_account_fs.swap_active_tdata_with_target):
+             patch('src.core.account.account_operations.get_tdata_link_target', mock_account_fs.get_tdata_link_target), \
+             patch('src.core.account.account_operations.repoint_tdata_link', mock_account_fs.repoint_tdata_link):
             result = account_operations._account_switch(
                 method="target",
                 max_retries=5
@@ -147,7 +156,8 @@ class TestP0AccountOperations:
 
         with patch('src.core.account.account_operations.AESCipher', return_value=cipher), \
              patch('src.core.account.account_operations.find_account_folder', mock_account_fs.find_account_folder), \
-             patch('src.core.account.account_operations.swap_active_tdata_with_target', mock_account_fs.swap_active_tdata_with_target):
+             patch('src.core.account.account_operations.get_tdata_link_target', mock_account_fs.get_tdata_link_target), \
+             patch('src.core.account.account_operations.repoint_tdata_link', mock_account_fs.repoint_tdata_link):
             result = account_operations._account_switch(
                 method="target",
                 max_retries=1,
@@ -178,11 +188,13 @@ class TestP0AccountOperations:
             return True
 
         cipher.decrypt.side_effect = mock_decrypt
-        mock_account_fs.find_account_folder.return_value = "tdata"
+        mock_account_fs.find_account_folder.return_value = "tdata-corrupted"
+        mock_account_fs.get_tdata_link_target.return_value = "tdata-corrupted"
 
         with patch('src.core.account.account_operations.AESCipher', return_value=cipher), \
              patch('src.core.account.account_operations.find_account_folder', mock_account_fs.find_account_folder), \
-             patch('src.core.account.account_operations.swap_active_tdata_with_target', mock_account_fs.swap_active_tdata_with_target):
+             patch('src.core.account.account_operations.get_tdata_link_target', mock_account_fs.get_tdata_link_target), \
+             patch('src.core.account.account_operations.repoint_tdata_link', mock_account_fs.repoint_tdata_link):
             result = account_operations._account_switch(
                 method="target",
                 max_retries=1,
@@ -193,15 +205,34 @@ class TestP0AccountOperations:
         mock_config.login_with_keys.assert_called_once()
         assert decrypt_calls[0] == 2
 
+    def test_switch_already_active_skips_repoint(self, mock_config, mock_logger, mock_account_fs):
+        """验证目标账户已是当前链接指向时，跳过重指向直接解密。"""
+        mock_config.tag = "active_account"
+        mock_config.default = "default"
+        mock_config.pwd = "test_password"
+        mock_config.decrypted = False
+        mock_config.path = "/tmp/test_tas"
 
-class TestTempFolderNaming:
-    """验证账户交换时的临时目录命名策略。"""
+        from src.core.crypto import AESCipher
+        cipher = MagicMock(spec=AESCipher)
+        cipher.decrypt.return_value = True
 
-    def test_fixed_temp_name_in_test(self):
-        """通过 monkeypatch 固定临时名，便于断言账户目录交换路径。"""
-        with patch.object(account_operations, 'generate_temp_name', return_value="tdata-fixed1234"):
-            name = account_operations.generate_temp_name()
-            assert name == "tdata-fixed1234"
+        mock_account_fs.find_account_folder.return_value = "tdata-active"
+        mock_account_fs.get_tdata_link_target.return_value = "tdata-active"
+        mock_account_fs.repoint_tdata_link.return_value = True
+
+        with patch('src.core.account.account_operations.AESCipher', return_value=cipher), \
+             patch('src.core.account.account_operations.find_account_folder', mock_account_fs.find_account_folder), \
+             patch('src.core.account.account_operations.get_tdata_link_target', mock_account_fs.get_tdata_link_target), \
+             patch('src.core.account.account_operations.repoint_tdata_link', mock_account_fs.repoint_tdata_link):
+            result = account_operations._account_switch(
+                method="target",
+                max_retries=1
+            )
+
+        assert result is True
+        assert mock_config.decrypted is True
+        mock_account_fs.repoint_tdata_link.assert_not_called()
 
 
 class TestRecovery:
@@ -233,4 +264,3 @@ class TestRecovery:
                 account_operations.recovery(config=mock_config, logger=mock_logger)
                 mock_pm.kill_process.assert_called_once_with("CustomClient.exe")
                 mock_restore.assert_called_once()
-

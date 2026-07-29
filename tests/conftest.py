@@ -132,7 +132,9 @@ def mock_account_fs():
     """提供账户文件系统替身。"""
     fs = MagicMock()
     fs.find_account_folder.return_value = "tdata-account1"
-    fs.swap_active_tdata_with_target.return_value = True
+    fs.repoint_tdata_link.return_value = True
+    fs.get_tdata_link_target.return_value = None
+    fs.is_tdata_link.return_value = False
     return fs
 
 

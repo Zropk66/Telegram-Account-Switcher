@@ -36,6 +36,8 @@ def search_file_in_dirs(directory: str | Path, tag_name: str) -> Optional[str]:
             return None
 
         for entry in base_dir.iterdir():
+            if entry.is_symlink():
+                continue
             if not entry.is_dir():
                 continue
             tas_tag_file = entry / TAG_FILE

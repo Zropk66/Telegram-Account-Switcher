@@ -317,6 +317,8 @@ class ConfigService:
             base_dir = Path(self.path)
             tag_to_folder = {}
             for entry in base_dir.iterdir():
+                if entry.is_symlink():
+                    continue
                 if entry.is_dir():
                     tas_tag_file = entry / "tas_tag"
                     if tas_tag_file.is_file():

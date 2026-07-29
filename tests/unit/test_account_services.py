@@ -1,11 +1,31 @@
 """文件系统与恢复服务单元测试。"""
+import os
 from pathlib import Path
+from unittest.mock import patch
+
+import pytest
 
 from src.core.account.account_services import (
     find_account_folder,
-    swap_active_tdata_with_target,
-    AccountRecoveryService
+    repoint_tdata_link,
+    is_tdata_link,
+    get_tdata_link_target,
+    remove_tdata_link,
+    AccountRecoveryService,
 )
+
+
+def _can_symlink(tmp_path):
+    """检测当前环境是否支持创建软链接。"""
+    target = tmp_path / "probe_target"
+    link = tmp_path / "probe_link"
+    target.mkdir()
+    try:
+        os.symlink("probe_target", str(link), target_is_directory=True)
+        link.unlink()
+        return True
+    except (OSError, NotImplementedError):
+        return False
 
 
 class TestAccountFileSystemService:
@@ -27,121 +47,220 @@ class TestAccountFileSystemService:
         assert find_account_folder(str(base_dir), "account2") == "tdata-account2"
         assert find_account_folder(str(base_dir), "non_existent") is None
 
-    def test_swap_tdata_safe(self, tmp_path):
-        """验证 `tdata` 与目标目录的交换操作能否安全完成。"""
+    def test_find_account_skips_symlink(self, tmp_path):
+        """验证 find_account_folder 跳过软链接，不将 tdata 链接识别为账户目录。"""
+        if not _can_symlink(tmp_path):
+            pytest.skip("当前环境不支持软链接")
+
         base_dir = tmp_path
 
-        tdata_dir = base_dir / "tdata"
-        tdata_dir.mkdir()
-        (tdata_dir / "tdata_file.txt").write_text("tdata content")
+        account_dir = base_dir / "tdata-account1"
+        account_dir.mkdir()
+        (account_dir / "tas_tag").write_text("account1", encoding="utf-8")
 
+        tdata_link = base_dir / "tdata"
+        os.symlink("tdata-account1", str(tdata_link), target_is_directory=True)
+
+        result = find_account_folder(str(base_dir), "account1")
+        assert result == "tdata-account1"
+
+    def test_repoint_creates_new_link(self, tmp_path):
+        """验证 tdata 不存在时创建新软链接。"""
+        base_dir = tmp_path
         target_dir = base_dir / "tdata-target"
         target_dir.mkdir()
-        (target_dir / "target_file.txt").write_text("target content")
 
-        temp_prefix = "tdata-temp123"
-        result = swap_active_tdata_with_target(str(base_dir), "tdata-target", temp_prefix)
-
-        assert result is True
-        new_tdata = base_dir / "tdata"
-        assert new_tdata.is_dir()
-        assert (new_tdata / "target_file.txt").exists()
-        assert not target_dir.exists()
-
-    def test_swap_same_folder_returns_true(self, tmp_path):
-        """验证目标已经是活跃目录时直接返回 True。"""
-        base_dir = tmp_path
-
-        tdata_dir = base_dir / "tdata"
-        tdata_dir.mkdir()
-        (tdata_dir / "test.txt").write_text("test")
-
-        result = swap_active_tdata_with_target(str(base_dir), "tdata", "tdata-temp")
+        with patch('src.core.account.account_services.os.symlink') as mock_symlink:
+            result = repoint_tdata_link(str(base_dir), "tdata-target")
 
         assert result is True
-        assert tdata_dir.exists()
+        mock_symlink.assert_called_once_with(
+            "tdata-target", str(base_dir / "tdata"), target_is_directory=True
+        )
 
-    def test_swap_missing_tdata_returns_false(self, tmp_path):
-        """验证原活跃目录不存在时仍能将目标提升为 tdata。"""
+    def test_repoint_already_pointing_to_target(self, tmp_path):
+        """验证已指向目标时直接返回 True（无操作）。"""
+        if not _can_symlink(tmp_path):
+            pytest.skip("当前环境不支持软链接")
+
         base_dir = tmp_path
-
         target_dir = base_dir / "tdata-target"
         target_dir.mkdir()
-        (target_dir / "target_file.txt").write_text("target content")
 
-        result = swap_active_tdata_with_target(str(base_dir), "tdata-target", "tdata-temp")
+        tdata_link = base_dir / "tdata"
+        os.symlink("tdata-target", str(tdata_link), target_is_directory=True)
+
+        with patch('src.core.account.account_services.os.symlink') as mock_symlink:
+            result = repoint_tdata_link(str(base_dir), "tdata-target")
 
         assert result is True
-        new_tdata = base_dir / "tdata"
-        assert new_tdata.is_dir()
-        assert (new_tdata / "target_file.txt").exists()
+        mock_symlink.assert_not_called()
 
-    def test_swap_missing_target_returns_false(self, tmp_path):
-        """验证若目标目录不存在，交换操作应被正确拒绝。"""
+    def test_repoint_removes_old_link_and_creates_new(self, tmp_path):
+        """验证已有链接指向其他目标时移除旧链接并创建新链接。"""
+        if not _can_symlink(tmp_path):
+            pytest.skip("当前环境不支持软链接")
+
         base_dir = tmp_path
+        other_dir = base_dir / "tdata-other"
+        other_dir.mkdir()
+        target_dir = base_dir / "tdata-target"
+        target_dir.mkdir()
 
-        tdata_dir = base_dir / "tdata"
-        tdata_dir.mkdir()
+        tdata_link = base_dir / "tdata"
+        os.symlink("tdata-other", str(tdata_link), target_is_directory=True)
 
-        result = swap_active_tdata_with_target(str(base_dir), "non_existent", "tdata-temp")
+        with patch('src.core.account.account_services.os.symlink') as mock_symlink:
+            result = repoint_tdata_link(str(base_dir), "tdata-target")
+
+        assert result is True
+        mock_symlink.assert_called_once_with(
+            "tdata-target", str(base_dir / "tdata"), target_is_directory=True
+        )
+        assert not tdata_link.is_symlink() or get_tdata_link_target(str(base_dir)) == "tdata-target"
+
+    def test_repoint_target_not_exist_returns_false(self, tmp_path):
+        """验证目标目录不存在时返回 False。"""
+        result = repoint_tdata_link(str(tmp_path), "non_existent")
         assert result is False
+
+    def test_repoint_migrates_real_tdata(self, tmp_path):
+        """验证实体 tdata 目录会被迁移为账户目录后再创建链接。"""
+        base_dir = tmp_path
+        tdata_dir = base_dir / "tdata"
+        tdata_dir.mkdir()
+        (tdata_dir / "tas_tag").write_text("mytag", encoding="utf-8")
+
+        target_dir = base_dir / "tdata-target"
+        target_dir.mkdir()
+
+        with patch('src.core.account.account_services.os.symlink') as mock_symlink:
+            result = repoint_tdata_link(str(base_dir), "tdata-target")
+
+        assert result is True
+        assert (base_dir / "tdata-mytag").is_dir()
+        mock_symlink.assert_called_once()
+
+    def test_repoint_migrate_conflict_returns_false(self, tmp_path):
+        """验证迁移目标已存在时返回 False。"""
+        base_dir = tmp_path
+        tdata_dir = base_dir / "tdata"
+        tdata_dir.mkdir()
+        (tdata_dir / "tas_tag").write_text("mytag", encoding="utf-8")
+
+        conflict_dir = base_dir / "tdata-mytag"
+        conflict_dir.mkdir()
+
+        target_dir = base_dir / "tdata-target"
+        target_dir.mkdir()
+
+        result = repoint_tdata_link(str(base_dir), "tdata-target")
+        assert result is False
+
+    def test_is_tdata_link_true(self, tmp_path):
+        """验证 tdata 为软链接时返回 True。"""
+        if not _can_symlink(tmp_path):
+            pytest.skip("当前环境不支持软链接")
+
+        base_dir = tmp_path
+        target = base_dir / "tdata-real"
+        target.mkdir()
+        os.symlink("tdata-real", str(base_dir / "tdata"), target_is_directory=True)
+
+        assert is_tdata_link(str(base_dir)) is True
+
+    def test_is_tdata_link_false(self, tmp_path):
+        """验证 tdata 为实体目录或不存在时返回 False。"""
+        base_dir = tmp_path
+        assert is_tdata_link(str(base_dir)) is False
+
+        (base_dir / "tdata").mkdir()
+        assert is_tdata_link(str(base_dir)) is False
+
+    def test_get_tdata_link_target(self, tmp_path):
+        """验证获取 tdata 软链接指向的目标文件夹名。"""
+        if not _can_symlink(tmp_path):
+            pytest.skip("当前环境不支持软链接")
+
+        base_dir = tmp_path
+        target = base_dir / "tdata-account1"
+        target.mkdir()
+        os.symlink("tdata-account1", str(base_dir / "tdata"), target_is_directory=True)
+
+        assert get_tdata_link_target(str(base_dir)) == "tdata-account1"
+
+    def test_get_tdata_link_target_not_link(self, tmp_path):
+        """验证 tdata 非软链接时返回 None。"""
+        base_dir = tmp_path
+        assert get_tdata_link_target(str(base_dir)) is None
+
+        (base_dir / "tdata").mkdir()
+        assert get_tdata_link_target(str(base_dir)) is None
+
+    def test_remove_tdata_link(self, tmp_path):
+        """验证移除 tdata 软链接不影响目标目录。"""
+        if not _can_symlink(tmp_path):
+            pytest.skip("当前环境不支持软链接")
+
+        base_dir = tmp_path
+        target = base_dir / "tdata-real"
+        target.mkdir()
+        (target / "file.txt").write_text("content")
+
+        os.symlink("tdata-real", str(base_dir / "tdata"), target_is_directory=True)
+
+        result = remove_tdata_link(str(base_dir))
+        assert result is True
+        assert not (base_dir / "tdata").exists()
+        assert target.is_dir()
+        assert (target / "file.txt").exists()
+
+    def test_remove_tdata_link_no_link(self, tmp_path):
+        """验证 tdata 不存在或非链接时返回 True（幂等）。"""
+        base_dir = tmp_path
+        assert remove_tdata_link(str(base_dir)) is True
 
 
 class TestAccountRecoveryService:
     """验证账户恢复服务在异常切换场景下的现场修复能力。"""
 
-    def test_cleanup_orphan_restores_tdata(self, tmp_path, mock_logger):
-        """验证程序崩溃后，能自动识别并恢复残留的临时目录。"""
+    def test_cleanup_removes_broken_symlink(self, tmp_path, mock_logger):
+        """验证失效的 tdata 软链接会被移除。"""
+        if not _can_symlink(tmp_path):
+            pytest.skip("当前环境不支持软链接")
+
         base_dir = tmp_path
+
+        temp_target = base_dir / "tdata-temp-target"
+        temp_target.mkdir()
+        os.symlink("tdata-temp-target", str(base_dir / "tdata"), target_is_directory=True)
+        temp_target.rmdir()
+
         recovery = AccountRecoveryService(mock_logger)
-
-        orphan_dir = base_dir / "tdata-abc123"
-        orphan_dir.mkdir()
-        (orphan_dir / "recovery_file.txt").write_text("recovery content")
-
-        assert not (base_dir / "tdata").exists()
-
         recovery.cleanup_orphan_folders(str(base_dir))
 
-        tdata_dir = base_dir / "tdata"
-        assert tdata_dir.is_dir()
-        assert (tdata_dir / "recovery_file.txt").exists()
-        assert not orphan_dir.exists()
+        assert not (base_dir / "tdata").is_symlink()
         mock_logger.warning.assert_called()
 
-    def test_cleanup_no_orphan_does_nothing(self, tmp_path, mock_logger):
-        """验证无残留时，清理逻辑不会对正常状态造成干扰。"""
+    def test_cleanup_migrates_real_tdata(self, tmp_path, mock_logger):
+        """验证实体 tdata 目录会被迁移为软链接。"""
         base_dir = tmp_path
-        recovery = AccountRecoveryService(mock_logger)
-
         tdata_dir = base_dir / "tdata"
         tdata_dir.mkdir()
-        (tdata_dir / "normal.txt").write_text("normal")
+        (tdata_dir / "tas_tag").write_text("mytag", encoding="utf-8")
 
-        recovery.cleanup_orphan_folders(str(base_dir))
-
-        assert tdata_dir.exists()
-        mock_logger.warning.assert_not_called()
-
-    def test_cleanup_multiple_orphans_restores_first(self, tmp_path, mock_logger):
-        """验证存在多个残留时仅修复首个发现的条目。"""
-        base_dir = tmp_path
         recovery = AccountRecoveryService(mock_logger)
+        with patch('src.core.account.account_services.os.symlink'):
+            recovery.cleanup_orphan_folders(str(base_dir))
 
-        orphan1 = base_dir / "tdata-first"
-        orphan1.mkdir()
-        (orphan1 / "file1.txt").write_text("first")
+        assert (base_dir / "tdata-mytag").is_dir()
+        mock_logger.warning.assert_called()
 
-        orphan2 = base_dir / "tdata-second"
-        orphan2.mkdir()
-        (orphan2 / "file2.txt").write_text("second")
-
-        recovery.cleanup_orphan_folders(str(base_dir))
-
-        tdata_dir = base_dir / "tdata"
-        assert tdata_dir.is_dir()
-        assert (tdata_dir / "file1.txt").exists()
-        assert orphan2.exists()
+    def test_cleanup_no_tdata_does_nothing(self, tmp_path, mock_logger):
+        """验证无 tdata 时不触发清理动作。"""
+        recovery = AccountRecoveryService(mock_logger)
+        recovery.cleanup_orphan_folders(str(tmp_path))
+        mock_logger.warning.assert_not_called()
 
     def test_cleanup_empty_path_does_nothing(self, mock_logger):
         """验证非法路径输入不触发清理动作。"""

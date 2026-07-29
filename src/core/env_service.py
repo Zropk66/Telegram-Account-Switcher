@@ -60,6 +60,8 @@ class TelegramEnvService:
         feature_files = [KEY_FOLDER, "settingss", IDENTITY_FOLDER]
 
         for entry in base.iterdir():
+            if entry.is_symlink():
+                continue
             if not entry.is_dir():
                 continue
 

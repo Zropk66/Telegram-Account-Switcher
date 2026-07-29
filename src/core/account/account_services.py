@@ -1,22 +1,25 @@
 """账户文件夹操作与异常恢复."""
 
+import os
 from pathlib import Path
 from typing import Optional
 
 from src.core.config import ConfigService
 from src.core.constants import KEY_FOLDER, TAG_FILE, TDATA_DIR
 from src.core.logger import Logger
-from src.core.utils import safe_rename
+from src.core.runtime import generate_temp_name
 
 
 def find_account_folder(base_path_str: str, tag_name: str) -> Optional[str]:
-    """遍历 Telegram 目录，寻找含有匹配 tas_tag 标签文件的文件夹."""
+    """遍历 Telegram 目录，寻找含有匹配 tas_tag 标签文件的文件夹（跳过软链接）."""
     try:
         base_dir = Path(base_path_str)
         if not base_dir.is_dir():
             return None
 
         for entry in base_dir.iterdir():
+            if entry.is_symlink():
+                continue
             if entry.is_dir():
                 tas_tag_file = entry / TAG_FILE
                 if tas_tag_file.exists():
@@ -32,21 +35,95 @@ def find_account_folder(base_path_str: str, tag_name: str) -> Optional[str]:
         return None
 
 
-def swap_active_tdata_with_target(base_path_str: str, target_folder_name: str, temp_prefix: str) -> bool:
-    """原子化地交换活跃 tdata 与目标账户目录."""
+def is_tdata_link(base_path_str: str) -> bool:
+    """检查 tdata 是否为软链接."""
+    tdata_path = Path(base_path_str) / TDATA_DIR
+    return tdata_path.is_symlink()
+
+
+def get_tdata_link_target(base_path_str: str) -> Optional[str]:
+    """获取 tdata 软链接指向的目标文件夹名."""
+    tdata_path = Path(base_path_str) / TDATA_DIR
+    if tdata_path.is_symlink():
+        try:
+            return Path(os.readlink(str(tdata_path))).name
+        except OSError:
+            return None
+    return None
+
+
+def remove_tdata_link(base_path_str: str) -> bool:
+    """移除 tdata 软链接（不影响目标目录）."""
+    tdata_path = Path(base_path_str) / TDATA_DIR
+    if tdata_path.is_symlink():
+        try:
+            os.unlink(str(tdata_path))
+            return True
+        except OSError:
+            return False
+    return True
+
+
+def _migrate_real_tdata(base_path_str: str) -> Optional[str]:
+    """将实体 tdata 目录迁移为账户目录，返回迁移后的文件夹名."""
     base_path = Path(base_path_str)
     tdata_path = base_path / TDATA_DIR
-    temp_path = base_path / temp_prefix
-    target_path = base_path / target_folder_name
 
-    if target_path == tdata_path:
-        return True
+    if not tdata_path.exists() or tdata_path.is_symlink():
+        return None
+
+    tas_tag_file = tdata_path / TAG_FILE
+    tag_name = None
+    if tas_tag_file.exists():
+        try:
+            tag_name = tas_tag_file.read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeDecodeError):
+            pass
+
+    if tag_name:
+        target_folder = f"{TDATA_DIR}-{tag_name}"
+    else:
+        target_folder = generate_temp_name()
+
+    target_path = base_path / target_folder
+    if target_path.exists():
+        return None
 
     try:
-        with safe_rename(tdata_path, temp_path):
-            target_path.rename(tdata_path)
+        tdata_path.rename(target_path)
+        return target_folder
+    except OSError:
+        return None
+
+
+def repoint_tdata_link(base_path_str: str, target_folder_name: str) -> bool:
+    """重指向 tdata 软链接到目标账户目录（覆盖原有链接）."""
+    base_path = Path(base_path_str)
+    tdata_path = base_path / TDATA_DIR
+    target_path = base_path / target_folder_name
+
+    if not target_path.is_dir():
+        return False
+
+    if tdata_path.is_symlink():
+        current_target = get_tdata_link_target(base_path_str)
+        if current_target == target_folder_name:
+            return True
+        try:
+            os.unlink(str(tdata_path))
+        except OSError:
+            return False
+    elif tdata_path.exists():
+        migrated = _migrate_real_tdata(base_path_str)
+        if not migrated:
+            return False
+    else:
+        pass
+
+    try:
+        os.symlink(target_folder_name, str(tdata_path), target_is_directory=True)
         return True
-    except (FileNotFoundError, PermissionError, OSError):
+    except OSError:
         return False
 
 
@@ -63,7 +140,7 @@ class AccountRecoveryService:
         self.logger = logger
 
     def cleanup_orphan_folders(self, base_path_str: str) -> None:
-        """清理异常中断遗留的临时文件夹."""
+        """清理失效的 tdata 软链接，并处理遗留的实体 tdata 目录."""
         if not base_path_str:
             return
 
@@ -71,17 +148,23 @@ class AccountRecoveryService:
         if not base_path.is_dir():
             return
 
-        tdata_path = Path(base_path_str) / TDATA_DIR
-        if not tdata_path.exists():
-            for entry in Path(base_path_str).iterdir():
-                if entry.name.startswith(f"{TDATA_DIR}-") and entry.is_dir():
-                    try:
-                        self.logger.warning(f"检测到异常中断，正在从 {entry.name} 恢复...")
-                        entry.rename(tdata_path)
-                        return
-                    except OSError as rename_err:
-                        self.logger.warning(f"从临时目录 {entry.name} 恢复 {TDATA_DIR} 失败: {rename_err}")
-                        continue
+        tdata_path = base_path / TDATA_DIR
+
+        if tdata_path.is_symlink() and not tdata_path.exists():
+            try:
+                os.unlink(str(tdata_path))
+                self.logger.warning("检测到失效的 tdata 软链接，已移除")
+            except OSError as e:
+                self.logger.warning(f"移除失效 tdata 软链接失败: {e}")
+
+        if tdata_path.exists() and not tdata_path.is_symlink():
+            migrated = _migrate_real_tdata(base_path_str)
+            if migrated:
+                try:
+                    os.symlink(migrated, str(tdata_path), target_is_directory=True)
+                    self.logger.warning(f"已将实体 tdata 迁移为软链接 -> {migrated}")
+                except OSError as e:
+                    self.logger.warning(f"创建 tdata 软链接失败: {e}")
 
     def recover_account(self, tag: str, config_manage: ConfigService) -> bool:
         """从备份密钥还原损坏的账户."""

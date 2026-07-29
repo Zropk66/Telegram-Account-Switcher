@@ -1,36 +1,39 @@
-"""文件夹交换及加解密操作."""
+"""文件夹软链接切换及加解密操作."""
 
 from pathlib import Path
 from typing import Callable, Literal, Optional
 
-from src.core.account.account_services import find_account_folder, swap_active_tdata_with_target
+from src.core.account.account_services import (
+    find_account_folder,
+    get_tdata_link_target,
+    repoint_tdata_link,
+)
 from src.core.config import ConfigService
 from src.core.constants import KEY_FOLDER, MAX_RETRIES, TDATA_DIR
 from src.core.crypto import AESCipher
 from src.core.exceptions import TASCipherException, TASException
 from src.core.logger import Logger
 from src.core.process_manager import ProcessManager
-from src.core.runtime import delay, generate_temp_name
+from src.core.runtime import delay
 
 logger = Logger()
 configs = ConfigService()
 
 
 def restore_default(
-    max_retries: int = MAX_RETRIES, target_folder: Optional[str] = None, temp_name: Optional[str] = None
+    max_retries: int = MAX_RETRIES, target_folder: Optional[str] = None
 ) -> bool:
     """还原默认账户."""
-    return _account_switch("restore", max_retries, target_folder=target_folder, temp_name=temp_name)
+    return _account_switch("restore", max_retries, target_folder=target_folder)
 
 
 def switch_to_tag(
     max_retries: int = MAX_RETRIES,
     confirm_callback: Optional[Callable[[str], bool]] = None,
     target_folder: Optional[str] = None,
-    temp_name: Optional[str] = None,
 ) -> bool:
     """切换到指定标签账户."""
-    return _account_switch("target", max_retries, confirm_callback, target_folder, temp_name)
+    return _account_switch("target", max_retries, confirm_callback, target_folder)
 
 
 def _account_switch(
@@ -38,7 +41,6 @@ def _account_switch(
     max_retries: int = MAX_RETRIES,
     confirm_callback: Optional[Callable[[str], bool]] = None,
     target_folder: Optional[str] = None,
-    temp_name: Optional[str] = None,
 ) -> bool:
     """执行账户切换流程."""
     cipher = AESCipher(configs.pwd)
@@ -69,12 +71,23 @@ def _account_switch(
 
             if use_key_login:
                 logger.debug(f"密钥登录: {target_tag}")
+                if tag_folder:
+                    repoint_tdata_link(configs.path, tag_folder)
+                else:
+                    acc = configs.get_account(target_tag)
+                    cfg_folder = acc.get("folder") if acc else None
+                    if cfg_folder:
+                        tag_folder = cfg_folder
+                        target_path = Path(configs.path) / cfg_folder
+                        target_path.mkdir(parents=True, exist_ok=True)
+                        repoint_tdata_link(configs.path, cfg_folder)
                 if configs.login_with_keys(target_tag, str(tdata_path)):
                     configs.decrypted = True
                     return True
                 return False
 
-            if tag_folder == TDATA_DIR:
+            current_target = get_tdata_link_target(configs.path)
+            if tag_folder and current_target == tag_folder:
                 try:
                     cipher.decrypt(tdata_path / KEY_FOLDER)
                     configs.decrypted = True
@@ -84,9 +97,9 @@ def _account_switch(
                         if confirm_callback:
                             msg = f"检测到当前账户 '{target_tag}' 密钥损坏，是否尝试从备份库修复?"
                             if confirm_callback(msg):
-                                if configs.login_with_keys(target_tag, str(Path(configs.path) / TDATA_DIR)):
+                                if configs.login_with_keys(target_tag, str(tdata_path)):
                                     try:
-                                        cipher.decrypt(Path(configs.path) / TDATA_DIR / KEY_FOLDER)
+                                        cipher.decrypt(tdata_path / KEY_FOLDER)
                                         configs.decrypted = True
                                         return True
                                     except TASCipherException:
@@ -100,8 +113,7 @@ def _account_switch(
             if not method_func:
                 raise TASException(f"模式 '{method}' 未定义")
 
-            temp = temp_name or generate_temp_name()
-            if method_func(cipher, temp, tag_folder):
+            if method_func(cipher, tag_folder):
                 return True
 
             delay(0.1)
@@ -121,8 +133,8 @@ def _account_switch(
     return False
 
 
-def switch_to_default(cipher: AESCipher, temp: str, target_folder: Optional[str] = None) -> bool:
-    """切换到默认账户."""
+def switch_to_default(cipher: AESCipher, target_folder: Optional[str] = None) -> bool:
+    """切换到默认账户（重指向 tdata 软链接到默认账户目录）."""
     tdata_path = Path(configs.path) / TDATA_DIR
 
     if configs.pwd and configs.decrypted and configs.tag:
@@ -143,24 +155,24 @@ def switch_to_default(cipher: AESCipher, temp: str, target_folder: Optional[str]
         logger.error(f"无法定位默认账户 '{configs.default}' 的文件夹")
         return False
 
-    return swap_active_tdata_with_target(configs.path, default_folder, temp)
+    return repoint_tdata_link(configs.path, default_folder)
 
 
-def switch_to_target(cipher: AESCipher, temp: str, target_folder: Optional[str] = None) -> bool:
-    """切换到目标账户."""
+def switch_to_target(cipher: AESCipher, target_folder: Optional[str] = None) -> bool:
+    """切换到目标账户（重指向 tdata 软链接到目标账户目录）."""
     folder_name = target_folder or find_account_folder(configs.path, configs.tag)
     if not folder_name:
         return False
 
-    target_path = Path(configs.path) / folder_name
     tdata_path = Path(configs.path) / TDATA_DIR
 
-    if target_path == tdata_path:
+    current_target = get_tdata_link_target(configs.path)
+    if current_target == folder_name:
         cipher.decrypt(tdata_path / KEY_FOLDER)
         configs.decrypted = True
         return True
 
-    if not swap_active_tdata_with_target(configs.path, folder_name, temp):
+    if not repoint_tdata_link(configs.path, folder_name):
         return False
 
     cipher.decrypt(tdata_path / KEY_FOLDER)
