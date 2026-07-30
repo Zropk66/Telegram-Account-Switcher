@@ -3,7 +3,6 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
-*.obj
 
 # 开发工具与编辑器配置
 .idea/
@@ -43,3 +42,5 @@ TAS.log
 logs/
 .claude/
 .codegraph/
+src/hook/*.dll
+src/hook/*.obj
