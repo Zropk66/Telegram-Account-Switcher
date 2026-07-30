@@ -32,6 +32,15 @@ def test_reset_logger_state_restores_injected_globals():
     assert isinstance(_config_provider, DefaultConfigProvider)
 
 
+def test_logger_set_debug_mode():
+    """验证 set_debug 能正确设置调试模式。"""
+    Logger.set_debug(True)
+    assert Logger._debug_mode is True
+
+    Logger.set_debug(False)
+    assert Logger._debug_mode is False
+
+
 def test_logger_reset_instance_creates_new_singleton():
     """Logger 单例重置后应在下一次访问时重新初始化。"""
     first = Logger.get_instance()

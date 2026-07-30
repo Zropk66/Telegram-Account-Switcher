@@ -143,7 +143,7 @@ class SettingsWindow(QMainWindow):
         self.controller.model.load_from_config()
         self.ui.tags_widget.setContextMenuPolicy(Qt.CustomContextMenu)
         self.ui.log_output.setChecked(self.current_configs.get("log_output", True))
-        self.ui.fallback.setChecked(self.current_configs.get("fallback", True))
+        self.ui.fallback.setChecked(self.current_configs.get("hook_fallback", True))
 
         self._init_launch_mode_combo()
 
@@ -167,7 +167,7 @@ class SettingsWindow(QMainWindow):
             lambda s: self.update_current_config("log_output", bool(s))
         )
         self.ui.fallback.stateChanged.connect(
-            lambda s: self.update_current_config("fallback", bool(s))
+            lambda s: self.update_current_config("hook_fallback", bool(s))
         )
         self.ui.launch_mode_combo.currentIndexChanged.connect(
             self._on_launch_mode_changed

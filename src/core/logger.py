@@ -93,6 +93,7 @@ class Logger:
 
     _instance = None
     _lock = threading.Lock()
+    _debug_mode = False
 
     def __new__(cls, *args: Any, **kwargs: Any) -> "Logger":  # noqa: ANN401
         """实现日志单例."""
@@ -104,6 +105,12 @@ class Logger:
         return cls._instance
 
     @classmethod
+    def set_debug(cls, debug: bool) -> None:
+        """设置调试模式并重新初始化日志."""
+        cls._debug_mode = debug
+        cls._init_logger()
+
+    @classmethod
     def get_instance(cls) -> "Logger":
         """获取日志单例."""
         return cls()
@@ -113,9 +120,10 @@ class Logger:
         """释放日志单例."""
         loguru_logger.remove()
         cls._instance = None
+        cls._debug_mode = False
 
-    @staticmethod
-    def _init_logger() -> None:
+    @classmethod
+    def _init_logger(cls) -> None:
         """初始化日志配置."""
         global _exception_level_registered
         loguru_logger.remove()
@@ -129,15 +137,17 @@ class Logger:
             "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <level>{message}</level>"
         )
 
+        min_level = "DEBUG" if cls._debug_mode else "INFO"
+
         if sys.stderr is not None:
-            loguru_logger.add(sys.stderr, format=log_format, level="DEBUG", colorize=True)
+            loguru_logger.add(sys.stderr, format=log_format, level=min_level, colorize=True)
         if _config_provider.get("log_output", False):
             loguru_logger.add(
                 "TAS.log",
                 rotation="10 MB",
                 encoding="utf-8",
                 format=log_format,
-                level="DEBUG",
+                level=min_level,
             )
 
         _setup_popup_bridge()

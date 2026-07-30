@@ -52,7 +52,8 @@ class TelegramKeyManager:
 
             config_service.set_account(tag, account_data)
             return True
-        except (OSError, ValueError, TypeError):
+        except (OSError, ValueError, TypeError) as e:
+            TelegramKeyManager._log_error(f"备份账户 '{tag}' 密钥失败: {e}")
             return False
 
     @staticmethod
@@ -66,6 +67,14 @@ class TelegramKeyManager:
             if not (account.get("key") and account.get("identity") and account.get("info")):
                 return False
             try:
+                raw_info = base64.b64decode(account["info"])
+                raw_identity = base64.b64decode(account["identity"])
+                raw_key = base64.b64decode(account["key"])
+
+                if not raw_info or not raw_identity or not raw_key:
+                    TelegramKeyManager._log_error("Key登录数据解码为空")
+                    return False
+
                 tdata_dir = Path(tdata_path)
                 tdata_dir.mkdir(parents=True, exist_ok=True)
 
@@ -73,12 +82,13 @@ class TelegramKeyManager:
                 identity_path = PathConfig.get_identity_path(tdata_dir, True)
                 key_path = PathConfig.get_key_path(tdata_dir, True)
 
-                info_path.write_bytes(base64.b64decode(account["info"]))
-                identity_path.write_bytes(base64.b64decode(account["identity"]))
-                key_path.write_bytes(base64.b64decode(account["key"]))
+                info_path.write_bytes(raw_info)
+                identity_path.write_bytes(raw_identity)
+                key_path.write_bytes(raw_key)
 
                 return True
-            except (OSError, ValueError):
+            except (OSError, ValueError, TypeError) as e:
+                TelegramKeyManager._log_error(f"Key登录解码或写入失败: {e}")
                 return False
 
         except (OSError, RuntimeError):

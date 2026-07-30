@@ -225,12 +225,16 @@ class TestAccountSwitcher:
         mock_config.tags = {test_tag: {"id": "12345", "folder": "tdata-abc"}}
         mock_config.default = "default_account"
         mock_config.launch_mode = LaunchMode.HOOK
-        mock_config.fallback = False
+        mock_config.hook_fallback = False
         mock_config.has_complete_keys.return_value = False
         mock_process_manager.start_process.return_value = False
 
         switcher = AccountSwitcher()
-        with patch.object(switcher, '_fallback_to_symlink') as mock_fallback:
-            result = switcher.process()
-            assert result is False
-            mock_fallback.assert_not_called()
+        try:
+            with patch.object(switcher, '_fallback_to_symlink') as mock_fallback:
+                result = switcher.process()
+                assert result is False
+                mock_fallback.assert_not_called()
+        finally:
+            from src.core.config import ConfigService
+            ConfigService.reset_instance()

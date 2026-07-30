@@ -29,7 +29,7 @@ class ConfigService:
         "log_output": True,
         "agreed_to_decrypt": False,
         "launch_mode": LaunchMode.SYMLINK.value,
-        "fallback": True,
+        "hook_fallback": True,
     }
 
     _instance = None
@@ -217,14 +217,14 @@ class ConfigService:
         self._set_field("launch_mode", str, value)
 
     @property
-    def fallback(self) -> bool:
+    def hook_fallback(self) -> bool:
         """获取 hook 失败降级状态."""
-        return self._get_field("fallback", bool, True)
+        return self._get_field("hook_fallback", bool, True)
 
-    @fallback.setter
-    def fallback(self, value: bool) -> None:
+    @hook_fallback.setter
+    def hook_fallback(self, value: bool) -> None:
         """设置 hook 失败降级状态."""
-        self._set_field("fallback", bool, value)
+        self._set_field("hook_fallback", bool, value)
 
     @property
     def start_time(self) -> Optional[datetime]:

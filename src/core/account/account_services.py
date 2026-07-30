@@ -139,7 +139,7 @@ class AccountRecoveryService:
         """初始化账户恢复服务."""
         self.logger = logger
 
-    def cleanup_orphan_folders(self, base_path_str: str) -> None:
+    def cleanup_orphan_folders(self, base_path_str: str, config_service: Optional[ConfigService] = None) -> None:
         """清理失效的 tdata 软链接，并处理遗留的实体 tdata 目录."""
         if not base_path_str:
             return

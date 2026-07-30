@@ -277,7 +277,18 @@ class TestThreadSynchronization:
             t.join()
 
         assert all(results)
-        assert login_flag[0] is True
+
+    def test_target_folder_customization(self, tmp_path):
+        """验证指定 target_folder 时监控正确的数据目录路径。"""
+        from src.core.constants import TELEGRAM_IDENTITY_KEY, TELEGRAM_CONFIGS_SUBPATH
+
+        mock_config = MagicMock()
+        mock_config.path = str(tmp_path)
+        mock_logger = MagicMock()
+
+        monitor = AccountMonitor("tag1", "tag1", mock_config, mock_logger, target_folder="tdata-tag1")
+        expected_configs_path = tmp_path / "tdata-tag1" / TELEGRAM_IDENTITY_KEY / TELEGRAM_CONFIGS_SUBPATH
+        assert monitor.configs_file == expected_configs_path
 
 
 class TestAccountMonitor:

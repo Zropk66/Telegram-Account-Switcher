@@ -39,8 +39,8 @@ def switch_to_tag(
 def _account_switch(
     method: Literal["restore", "target"],
     max_retries: int = MAX_RETRIES,
-    confirm_callback: Optional[Callable[[str], bool]] = None,
-    target_folder: Optional[str] = None,
+    confirm_callback: Callable[[str], bool] | None = None,
+    target_folder: str | None = None,
 ) -> bool:
     """执行账户切换流程."""
     cipher = AESCipher(configs.pwd)
@@ -52,7 +52,7 @@ def _account_switch(
             use_key_login = getattr(configs, "force_key_login", False)
             tag_folder = target_folder or find_account_folder(configs.path, target_tag)
 
-            if not use_key_login:
+            if not use_key_login:  # noqa: SIM102
                 if not tag_folder:
                     if configs.has_complete_keys(target_tag):
                         if confirm_callback:
@@ -93,7 +93,7 @@ def _account_switch(
                     configs.decrypted = True
                     return True
                 except TASCipherException as e:
-                    if configs.has_complete_keys(target_tag):
+                    if configs.has_complete_keys(target_tag):  # noqa: SIM102
                         if confirm_callback:
                             msg = f"检测到当前账户 '{target_tag}' 密钥损坏，是否尝试从备份库修复?"
                             if confirm_callback(msg):
@@ -133,7 +133,7 @@ def _account_switch(
     return False
 
 
-def switch_to_default(cipher: AESCipher, target_folder: Optional[str] = None) -> bool:
+def switch_to_default(cipher: AESCipher, target_folder: str | None = None) -> bool:
     """切换到默认账户（重指向 tdata 软链接到默认账户目录）."""
     tdata_path = Path(configs.path) / TDATA_DIR
 
@@ -158,7 +158,7 @@ def switch_to_default(cipher: AESCipher, target_folder: Optional[str] = None) ->
     return repoint_tdata_link(configs.path, default_folder)
 
 
-def switch_to_target(cipher: AESCipher, target_folder: Optional[str] = None) -> bool:
+def switch_to_target(cipher: AESCipher, target_folder: str | None = None) -> bool:
     """切换到目标账户（重指向 tdata 软链接到目标账户目录）."""
     folder_name = target_folder or find_account_folder(configs.path, configs.tag)
     if not folder_name:
@@ -180,7 +180,7 @@ def switch_to_target(cipher: AESCipher, target_folder: Optional[str] = None) -> 
     return True
 
 
-def recovery(config: Optional[ConfigService] = None, logger: Optional[Logger] = None) -> None:
+def recovery(config: ConfigService | None = None, logger: Logger | None = None) -> None:
     """紧急恢复默认账户."""
     pm = ProcessManager()
     cfg = config or configs
@@ -188,6 +188,6 @@ def recovery(config: Optional[ConfigService] = None, logger: Optional[Logger] = 
     try:
         pm.kill_process(cfg.client)
         restore_default()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         if log:
             log.error(f"紧急恢复执行中发生异常: {e}")

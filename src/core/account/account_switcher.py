@@ -79,7 +79,15 @@ class AccountSwitcher:
 
         if success:
             if should_monitor:
-                self.monitor = AccountMonitor(tag, check_tag, self._config, self.logger, spawn_time=spawn_time)
+                active_folder = target_folder if (tag and tag != self._config.default) else default_folder
+                self.monitor = AccountMonitor(
+                    tag,
+                    check_tag,
+                    self._config,
+                    self.logger,
+                    spawn_time=spawn_time,
+                    target_folder=active_folder if self._config.launch_mode == LaunchMode.HOOK else None,
+                )
             self._config.sync_all_account_paths()
             return True
 
@@ -148,7 +156,7 @@ class AccountSwitcher:
             spawn_time = datetime.now()
             if success:
                 success = self._process_manager.start_process(wait=True, tdata_name=default_folder)
-                if not success and is_hook and self._config.fallback:
+                if not success and is_hook and self._config.hook_fallback:
                     success = self._fallback_to_symlink(
                         is_default=True,
                         confirm_callback=confirm_callback,
@@ -162,7 +170,7 @@ class AccountSwitcher:
             self.logger.debug("使用 hook 模式启动进程")
             spawn_time = datetime.now()
             success = self._process_manager.start_process(wait=True, tdata_name=target_folder)
-            if not success and self._config.fallback:
+            if not success and self._config.hook_fallback:
                 success = self._fallback_to_symlink(
                     is_default=False,
                     confirm_callback=confirm_callback,

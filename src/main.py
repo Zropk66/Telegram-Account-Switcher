@@ -98,6 +98,7 @@ class TASApp:
         """运行应用程序."""
         try:
             args = self.cli_controller.parse_args()
+            Logger.set_debug(getattr(args, "debug", False))
         except (SystemExit, KeyboardInterrupt):
             raise
         except Exception as e:

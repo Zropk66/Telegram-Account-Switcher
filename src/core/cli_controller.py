@@ -50,6 +50,7 @@ class CLIController:
         action_group.add_argument("--switch", "-s", type=str, metavar="tag", help="切换至指定标签账户")
         action_group.add_argument("--key-login", "-k", action="store_true", help="强制Key登录")
         action_group.add_argument("--tag", "-t", type=str, metavar="tag", help="操作指定标签")
+        action_group.add_argument("--debug", action="store_true", help="启用调试日志输出")
 
         exclusive_group = parser.add_mutually_exclusive_group()
         exclusive_group.add_argument("--version", "-v", action="store_true", help="查看版本")

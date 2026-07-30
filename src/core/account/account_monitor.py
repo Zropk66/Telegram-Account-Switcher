@@ -81,6 +81,7 @@ class AccountMonitor:
         config_manage: ConfigService,
         logger: Logger,
         spawn_time: datetime | None = None,
+        target_folder: str | None = None,
     ) -> None:
         """初始化账户监控器."""
         self.tag = tag
@@ -88,7 +89,9 @@ class AccountMonitor:
         self.config = config_manage
         self.logger = logger
         self.spawn_time = spawn_time or datetime.now()
-        self.configs_file = Path(config_manage.path) / TDATA_DIR / TELEGRAM_IDENTITY_KEY / TELEGRAM_CONFIGS_SUBPATH
+        self.target_folder = target_folder
+        folder_name = target_folder or TDATA_DIR
+        self.configs_file = Path(config_manage.path) / folder_name / TELEGRAM_IDENTITY_KEY / TELEGRAM_CONFIGS_SUBPATH
 
         self._wake_event = threading.Event()
         self.completion_event = threading.Event()
@@ -172,7 +175,8 @@ class AccountMonitor:
                             running_time = datetime.now() - self.config.start_time
                             if running_time.total_seconds() >= MONITOR_SESSION_MIN_DURATION and is_logged_in:
                                 self.logger.info(f"正在备份账户密钥：{self.tag}")
-                                self.config.backup_account_keys(self.tag, Path(self.config.path) / TDATA_DIR)
+                                account_dir = Path(self.config.path) / (self.target_folder or TDATA_DIR)
+                                self.config.backup_account_keys(self.tag, account_dir)
 
                         self.logger.debug("正在恢复默认账户状态...")
                         restore_default()
