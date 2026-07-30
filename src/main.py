@@ -98,7 +98,7 @@ class TASApp:
         """运行应用程序."""
         try:
             args = self.cli_controller.parse_args()
-            Logger.set_debug(getattr(args, "debug", False))
+            Logger.set_debug(args.debug)
         except (SystemExit, KeyboardInterrupt):
             raise
         except Exception as e:
@@ -122,12 +122,12 @@ class TASApp:
             return 0
         elif action == CLIAction.SHOW_SETTINGS:
             from src.ui.settings_ui import open_settings_window
-
             open_settings_window(self.version)
             return 0
         elif action == CLIAction.EXIT:
             return 0
-
+        else:
+            CONFIG.config_check = True
         logger.info(f"切换账户: {CONFIG.tag or CONFIG.default}")
         logger.debug(f"Telegram路径: {CONFIG.path}")
 
@@ -159,9 +159,9 @@ def log_and_exit(mark: bool = False) -> None:
     """记录日志并退出."""
     global _cleanup_done, CONFIG
     if mark and _cleanup_done.is_set():
-        return None
+        return
     with suppress(Exception):
-        if mark:
+        if mark and CONFIG.config_check:
             _cleanup_done.set()
             recovery(config=CONFIG, logger=logger)
 
@@ -169,7 +169,7 @@ def log_and_exit(mark: bool = False) -> None:
             CONFIG.shutdown()
             if CONFIG.log_output and CONFIG.start_time and logger:
                 logger.info(f"运行时长：{CONFIG.watch_time()}")
-    return None
+    return
 
 
 def register_signal_handlers() -> None:
@@ -191,6 +191,11 @@ def handle_global_exception(
     """处理全局异常."""
     if exc_type in (KeyboardInterrupt, SystemExit):
         sys.exit(0)
+
+    if CONFIG and CONFIG.config_check:
+        from contextlib import suppress as _suppress
+        with _suppress(Exception):
+            recovery(config=CONFIG, logger=logger)
 
     if logger:
         logger.exception(

@@ -62,7 +62,8 @@ class TestIntegrationAccountSwitch:
         mock_account_fs.get_tdata_link_target.return_value = None
         mock_account_fs.repoint_tdata_link.return_value = True
 
-        with patch('src.core.account.account_operations.AESCipher', return_value=mock_cipher), \
+        with patch('src.core.account.account_operations.configs', mock_config), \
+             patch('src.core.account.account_operations.AESCipher', return_value=mock_cipher), \
              patch('src.core.account.account_operations.find_account_folder', mock_account_fs.find_account_folder), \
              patch('src.core.account.account_operations.get_tdata_link_target', mock_account_fs.get_tdata_link_target), \
              patch('src.core.account.account_operations.repoint_tdata_link', mock_account_fs.repoint_tdata_link):

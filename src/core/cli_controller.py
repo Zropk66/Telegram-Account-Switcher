@@ -71,10 +71,10 @@ class CLIController:
 
             path = Path(self.config.path)
 
-            if not (path / self.config.client).is_file():
-                raise TASConfigException("找不到客户端程序")
             if not path.is_dir():
                 raise TASConfigException("路径格式不正确")
+            if not (path / self.config.client).is_file():
+                raise TASConfigException("找不到客户端程序")
             if not self.config.default:
                 raise TASConfigException("未设置默认账户")
             default_folder = self.config.get_account(self.config.default).get("folder")

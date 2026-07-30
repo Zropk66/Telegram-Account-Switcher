@@ -90,7 +90,7 @@ Telegram/
 
 ## Configuration File
 
-Running the app automatically creates `configs.json`:
+Running the app automatically creates `config.json`:
 
 ```json
 {

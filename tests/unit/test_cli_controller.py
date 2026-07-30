@@ -94,7 +94,7 @@ def test_check_config_client_not_found(mock_config, mock_logger):
             result = cli.check_config(args)
 
             assert result is False
-            mock_logger.exception.assert_called_once()
+            mock_logger.error.assert_called_once()
 
 
 def test_validate_tag_invalid_fallback_default(mock_config, mock_logger):

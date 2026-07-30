@@ -44,12 +44,14 @@ def _account_switch(
 ) -> bool:
     """执行账户切换流程."""
     cipher = AESCipher(configs.pwd)
-    target_tag = None
+    target_tag = configs.default if method == "restore" else configs.tag
+    if not target_tag:
+        logger.error(f"无法定位目标账户: 未设置{'默认' if method == 'restore' else '切换'}账户")
+        return False
 
     for attempt in range(max_retries):
         try:
-            target_tag = configs.default if method == "restore" else configs.tag
-            use_key_login = getattr(configs, "force_key_login", False)
+            use_key_login = configs.force_key_login
             tag_folder = target_folder or find_account_folder(configs.path, target_tag)
 
             if not use_key_login:  # noqa: SIM102

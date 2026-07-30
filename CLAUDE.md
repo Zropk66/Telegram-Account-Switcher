@@ -23,7 +23,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
         - `account_operations.py`: Low-level directory swapping, encryption state checks, and failure fallbacks (`switch_to_tag`, `restore_default`).
         - `account_monitor.py`: Background thread that watches the Telegram process lifecycle.
     - **Configuration (`src/core/config/`)**:
-        - Persisted state stored in `configs.json` using `ConfigStorage`.
+        - Persisted state stored in `config.json` using `ConfigStorage`.
         - `ConfigService` provides typed access.
     - **Process Management**: `process_manager.py` handles tracking, starting, and gracefully killing the `Telegram.exe` client.
     - **Encryption**: `crypto.py` handles AES-256-GCM encryption/decryption of Telegram's internal `key_datas` files.

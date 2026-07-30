@@ -4,7 +4,7 @@ from enum import Enum
 
 # --- 应用元数据 ---
 APP_TITLE = "TAS"
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.1"
 SINGLE_INSTANCE_LOCK_NAME = "TelegramAccountSwitcher"
 MUTEX_PREFIX = "Global\\"
 
@@ -17,7 +17,7 @@ class LaunchMode(Enum):
 
 
 # --- 文件与目录名称 ---
-CONFIG_FILE = "configs.json"
+CONFIG_FILE = "config.json"
 TDATA_DIR = "tdata"
 IDENTITY_FOLDER = "D877F783D5D3EF8Cs"
 INFO_SUBFOLDER = "maps"

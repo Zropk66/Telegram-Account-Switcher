@@ -1,6 +1,7 @@
 """只读配置文件访问器."""
 
 import json
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -36,7 +37,6 @@ class ConfigData:
             raise ConfigLoadError(f"JSON 语法错误: {e}") from e
         except IOError as e:
             raise ConfigLoadError(f"文件读取失败: {e}") from e
-        return default
 
     @staticmethod
     def section(name: str) -> dict:
@@ -45,7 +45,7 @@ class ConfigData:
 
     @staticmethod
     def exists() -> bool:
-        """configs.json 是否存在."""
+        """config.json 是否存在."""
         return ConfigData.path().exists()
 
     @staticmethod
@@ -74,4 +74,9 @@ class _ConfigDataProvider:
     @staticmethod
     def get(key: str, default: Any = None) -> Any:  # noqa: ANN401
         """获取配置值."""
-        return ConfigData.read(key, default)
+        try:
+            value = ConfigData.read(key, default)
+        except ConfigLoadError as e:
+            traceback.print_tb(e.__traceback__)
+            return default
+        return value

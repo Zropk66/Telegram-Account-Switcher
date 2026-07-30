@@ -37,7 +37,7 @@ docs/
 private_compile.bat
 
 # 项目特定文件与目录
-configs.json
+config.json
 TAS.log
 logs/
 .claude/

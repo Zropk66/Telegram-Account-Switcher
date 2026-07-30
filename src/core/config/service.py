@@ -237,6 +237,16 @@ class ConfigService:
         self._runtime.start_time = v
 
     @property
+    def config_check(self) -> bool:
+        """获取配置检查状态."""
+        return self._runtime.config_check
+
+    @config_check.setter
+    def config_check(self, v: bool) -> None:
+        """设置配置检查状态."""
+        self._runtime.config_check = v
+
+    @property
     def tag(self) -> str:
         """获取账户标签."""
         return self._runtime.tag

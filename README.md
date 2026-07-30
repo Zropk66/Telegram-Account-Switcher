@@ -90,7 +90,7 @@ Telegram/
 
 ## 配置文件说明
 
-首次运行会在应用根目录自动创建 `configs.json` 配置文件：
+首次运行会在应用根目录自动创建 `config.json` 配置文件：
 
 ```json
 {
