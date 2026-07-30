@@ -37,17 +37,6 @@ jobs:
         run: |
           uv sync --no-dev
 
-      - name: Download and setup UPX v5.1.0
-        shell: pwsh
-        run: |
-          $UPX_URL = "https://github.com/upx/upx/releases/download/v5.1.0/upx-5.1.0-win64.zip"
-          $UPX_ZIP = "upx-5.1.0-win64.zip"
-          $UPX_DIR = "upx-5.1.0-win64"
-          Invoke-WebRequest -Uri $UPX_URL -OutFile $UPX_ZIP
-          Expand-Archive -Path $UPX_ZIP -DestinationPath . -Force
-          $UPX_FULL_PATH = (Get-Item ".\$UPX_DIR").FullName
-          echo "$UPX_FULL_PATH" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
       - name: Install Nuitka
         run: |
           uv pip install 'nuitka[onefile]'
@@ -81,26 +70,7 @@ jobs:
 
       - name: Compile with Nuitka
         run: |
-          $EXTRA_ARGS = @(
-              "--onefile-no-compression",
-              "--assume-yes-for-downloads",
-              "--standalone",
-              "--onefile",
-              "--windows-console-mode=disable",
-              "--plugin-enable=upx",
-              "--plugin-enable=pyside6",
-              "--include-data-files=src/hook/hook.dll=src/hook/hook.dll",
-              "--output-filename=${{ env.OUTPUT_NAME }}",
-              "--output-dir=output",
-              "--remove-output",
-              "--lto=yes",
-              "--windows-product-name=TAS",
-              "--windows-product-version=${{ env.VERSION }}",
-              "--windows-file-version=${{ env.VERSION }}",
-              "--windows-file-description=Telegram Account Switcher",
-              ".\launcher.py"
-          )
-          uv run python -m nuitka @EXTRA_ARGS
+          uv run python build.py
         shell: pwsh
 
       - name: Upload Artifact

@@ -23,6 +23,7 @@ def build_args(build_mode: str, toolchain: str) -> list[str]:
 
     common_args = [
         "--onefile",
+        "--assume-yes-for-downloads",
         "--plugin-enable=pyside6",
         "--include-data-files=src/hook/hook.dll=src/hook/hook.dll",
         f"--output-filename=TAS_{build_mode}_{toolchain}_v{VERSION}",

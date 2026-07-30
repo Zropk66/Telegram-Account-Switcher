@@ -77,6 +77,17 @@ Telegram/
 
 > Each account directory contains a `tas_tag` file. TAS identifies account tags by reading `tas_tag` contents rather than relying on folder names.
 
+### Account Directory Setup Guide
+
+1. **Automatic Scanning (Recommended)**:
+   - Place existing Telegram account folders (such as `tdata` or copied account directories) inside the Telegram installation root directory.
+   - Open the TAS Settings window and click **"Auto Scan/Search"**. TAS will discover all accounts and automatically create the required `tas_tag` identifier files.
+
+2. **Manual Setup**:
+   - Create a new folder inside your Telegram root directory (e.g., `tdata-work`).
+   - Copy account data (`key_datas`, `D877F783D5D3EF8C`, etc.) into `tdata-work`.
+   - Create a text file named `tas_tag` inside `tdata-work` and write the tag name (e.g., `work`) into it.
+
 ## Configuration File
 
 Running the app automatically creates `configs.json`:
