@@ -3,8 +3,8 @@ setlocal
 
 where cl >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] MSVC compiler (cl.exe) not found.
-    echo Please run this script in "x64 Native Tools Command Prompt for VS" or execute vcvars64.bat first.
+    echo ERROR: MSVC compiler cl.exe not found.
+    echo Please run this script in MSVC Command Prompt or run vcvars64.bat first.
     exit /b 1
 )
 echo [1/3] Compiling MinHook library ...
