@@ -12,7 +12,7 @@ from src.core.config.data import ConfigData
 from src.core.config.key_manager import TelegramKeyManager
 from src.core.config.runtime import RuntimeState
 from src.core.config.storage import ConfigStorage
-from src.core.constants import TELEGRAM_EXE
+from src.core.constants import LaunchMode, TELEGRAM_EXE
 from src.core.utils import format_timedelta
 
 T = TypeVar("T")
@@ -28,6 +28,8 @@ class ConfigService:
         "tags": {},
         "log_output": True,
         "agreed_to_decrypt": False,
+        "launch_mode": LaunchMode.SYMLINK.value,
+        "fallback": True,
     }
 
     _instance = None
@@ -197,6 +199,32 @@ class ConfigService:
     def agreed_to_decrypt(self, value: bool) -> None:
         """设置密钥解密同意状态."""
         self._set_field("agreed_to_decrypt", bool, value)
+
+    @property
+    def launch_mode(self) -> LaunchMode:
+        """获取启动模式."""
+        value = self._get_field("launch_mode", str, LaunchMode.SYMLINK.value)
+        try:
+            return LaunchMode(value)
+        except ValueError:
+            return LaunchMode.SYMLINK
+
+    @launch_mode.setter
+    def launch_mode(self, value: "LaunchMode | str") -> None:
+        """设置启动模式."""
+        if isinstance(value, LaunchMode):
+            value = value.value
+        self._set_field("launch_mode", str, value)
+
+    @property
+    def fallback(self) -> bool:
+        """获取 hook 失败降级状态."""
+        return self._get_field("fallback", bool, True)
+
+    @fallback.setter
+    def fallback(self, value: bool) -> None:
+        """设置 hook 失败降级状态."""
+        self._set_field("fallback", bool, value)
 
     @property
     def start_time(self) -> Optional[datetime]:

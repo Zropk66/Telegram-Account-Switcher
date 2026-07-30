@@ -145,7 +145,7 @@
     <property name="geometry">
      <rect>
       <x>360</x>
-      <y>100</y>
+      <y>80</y>
       <width>75</width>
       <height>24</height>
      </rect>
@@ -155,22 +155,6 @@
     </property>
     <property name="text">
      <string>查找账户</string>
-    </property>
-   </widget>
-   <widget class="QPushButton" name="del_button">
-    <property name="geometry">
-     <rect>
-      <x>360</x>
-      <y>130</y>
-      <width>75</width>
-      <height>24</height>
-     </rect>
-    </property>
-    <property name="toolTip">
-     <string>删除参数</string>
-    </property>
-    <property name="text">
-     <string>删除</string>
     </property>
    </widget>
    <widget class="QPushButton" name="cancel_button">
@@ -209,7 +193,7 @@
     <property name="geometry">
      <rect>
       <x>10</x>
-      <y>200</y>
+      <y>220</y>
       <width>211</width>
       <height>16</height>
      </rect>
@@ -232,6 +216,35 @@
     </property>
     <property name="text">
      <string>保存</string>
+    </property>
+   </widget>
+   <widget class="QComboBox" name="launch_mode_combo">
+    <property name="geometry">
+     <rect>
+      <x>360</x>
+      <y>110</y>
+      <width>75</width>
+      <height>24</height>
+     </rect>
+    </property>
+    <property name="toolTip">
+     <string>选择账户切换的启动模式</string>
+    </property>
+   </widget>
+   <widget class="QCheckBox" name="fallback">
+    <property name="geometry">
+     <rect>
+      <x>360</x>
+      <y>140</y>
+      <width>82</width>
+      <height>20</height>
+     </rect>
+    </property>
+    <property name="toolTip">
+     <string>控制hook模式处理失败时是否降回链接模式</string>
+    </property>
+    <property name="text">
+     <string>降级处理</string>
     </property>
    </widget>
   </widget>

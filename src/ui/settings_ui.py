@@ -19,12 +19,18 @@ from PySide6.QtWidgets import (
 
 from src.core import Logger, TASConfigException
 from src.core.config import ConfigService
+from src.core.constants import LaunchMode
 from src.core.env_service import TelegramEnvService
 from src.ui.dialogs import EditLabelDialog, SettingsDialogHelper
 from src.ui.popup import alert, confirm
 from src.ui.settings_model import AccountListModel
 from src.ui.ui_settings import Ui_setting
-from src.ui.utils import AccountScannerHelper, BackgroundTaskRunner, DialogFactory, DoubleClickFilter
+from src.ui.utils import (
+    AccountScannerHelper,
+    BackgroundTaskRunner,
+    DialogFactory,
+    DoubleClickFilter,
+)
 
 
 def open_settings_window(version: str) -> int:
@@ -49,7 +55,9 @@ class SettingsController(QObject):
 
     def search_client_in_background(self) -> None:
         """启动后台线程搜索 Telegram 客户端."""
-        BackgroundTaskRunner.run_search_client(self.thread_pool, self._on_search_client_finished, self._on_error)
+        BackgroundTaskRunner.run_search_client(
+            self.thread_pool, self._on_search_client_finished, self._on_error
+        )
 
     @Slot(object)
     def _on_search_client_finished(self, result: tuple) -> None:
@@ -74,12 +82,15 @@ class SettingsController(QObject):
 
         if not self.window.current_configs.get("agreed_to_decrypt", False):
             if not confirm(
-                "这是您第一次使用寻找多账号功能.\n使用该功能需要解密该目录下的本地账户数据，您同意继续吗？", "解密确认"
+                "这是您第一次使用寻找多账号功能.\n使用该功能需要解密该目录下的本地账户数据，您同意继续吗？",
+                "解密确认",
             ):
                 return None
             self.window.update_current_config("agreed_to_decrypt", True)
 
-        existing_folders = AccountScannerHelper.get_existing_folders(self.window.ui.tags_widget)
+        existing_folders = AccountScannerHelper.get_existing_folders(
+            self.window.ui.tags_widget
+        )
 
         passcode = self.config.pwd
         accounts = TelegramEnvService.scan_accounts(base_path, passcode)
@@ -94,7 +105,9 @@ class SettingsController(QObject):
                 continue
 
             data = account_data.copy()
-            AccountScannerHelper.write_tag_file(base_path, folder_name, data.get("tag", folder_name))
+            AccountScannerHelper.write_tag_file(
+                base_path, folder_name, data.get("tag", folder_name)
+            )
 
             self.model.add_account(data)
             added_count += 1
@@ -117,7 +130,9 @@ class SettingsWindow(QMainWindow):
 
         self.ui.version_label.setText(f"TAS v{version}")
 
-        self.client_edit_double_click_filter = DoubleClickFilter(self.select_client_event)
+        self.client_edit_double_click_filter = DoubleClickFilter(
+            self.select_client_event
+        )
         self.ui.client_edit.installEventFilter(self.client_edit_double_click_filter)
         self.ui.client_edit.setText(self.current_configs.get("client"))
 
@@ -127,23 +142,53 @@ class SettingsWindow(QMainWindow):
 
         self.controller.model.load_from_config()
         self.ui.tags_widget.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.ui.log_output.setChecked(self.current_configs.get("log_output"))
+        self.ui.log_output.setChecked(self.current_configs.get("log_output", True))
+        self.ui.fallback.setChecked(self.current_configs.get("fallback", True))
+
+        self._init_launch_mode_combo()
 
         self._connect_signals()
 
     def _connect_signals(self) -> None:
         """绑定信号槽函数."""
-        self.ui.client_edit.textChanged.connect(lambda t: self.update_current_config("client", t))
-        self.ui.path_edit.textChanged.connect(lambda t: self.update_current_config("path", t))
-        self.ui.search_client_button.clicked.connect(self.controller.search_client_in_background)
+        self.ui.client_edit.textChanged.connect(
+            lambda t: self.update_current_config("client", t)
+        )
+        self.ui.path_edit.textChanged.connect(
+            lambda t: self.update_current_config("path", t)
+        )
+        self.ui.search_client_button.clicked.connect(
+            self.controller.search_client_in_background
+        )
         self.ui.tags_widget.itemDoubleClicked.connect(self.edit_item_event)
         self.ui.search_account_button.clicked.connect(self.scan_account_event)
-        self.ui.del_button.clicked.connect(self.remove_item_event)
         self.ui.tags_widget.customContextMenuRequested.connect(self.show_context_menu)
-        self.ui.log_output.stateChanged.connect(lambda s: self.update_current_config("log_output", bool(s)))
+        self.ui.log_output.stateChanged.connect(
+            lambda s: self.update_current_config("log_output", bool(s))
+        )
+        self.ui.fallback.stateChanged.connect(
+            lambda s: self.update_current_config("fallback", bool(s))
+        )
+        self.ui.launch_mode_combo.currentIndexChanged.connect(
+            self._on_launch_mode_changed
+        )
         self.ui.finish_button.clicked.connect(self.save_config_event)
         with suppress(AttributeError):
             self.ui.cancel_button.clicked.connect(self.close)
+
+    def _init_launch_mode_combo(self) -> None:
+        """初始化启动模式下拉框选项并选中当前配置值."""
+        self.ui.launch_mode_combo.clear()
+        self.ui.launch_mode_combo.addItem("链接", LaunchMode.SYMLINK.value)
+        self.ui.launch_mode_combo.addItem("hook", LaunchMode.HOOK.value)
+
+        current_mode = self.current_configs.get("launch_mode", LaunchMode.SYMLINK.value)
+        for i in range(self.ui.launch_mode_combo.count()):
+            if self.ui.launch_mode_combo.itemData(i) == current_mode:
+                self.ui.launch_mode_combo.setCurrentIndex(i)
+                break
+
+        self.ui.fallback.setEnabled(current_mode == LaunchMode.HOOK.value)
 
     @override
     def closeEvent(self, event: QCloseEvent) -> None:
@@ -166,12 +211,21 @@ class SettingsWindow(QMainWindow):
             self.add_item_event()
         elif delete_action and action == delete_action:
             self.controller.model.remove_current(
-                lambda: self.update_current_config("tags", self.config.get_all_accounts())
+                lambda: self.update_current_config(
+                    "tags", self.config.get_all_accounts()
+                )
             )
 
     def update_current_config(self, key: str, value: Any) -> None:  # noqa: ANN401
         """更新临时配置."""
         self.current_configs[key] = value
+
+    @Slot(int)
+    def _on_launch_mode_changed(self, index: int) -> None:
+        """启动模式切换事件槽函数."""
+        mode = self.ui.launch_mode_combo.itemData(index)
+        self.update_current_config("launch_mode", mode)
+        self.ui.fallback.setEnabled(mode == LaunchMode.HOOK.value)
 
     @Slot()
     def save_config_event(self) -> None:
@@ -212,7 +266,9 @@ class SettingsWindow(QMainWindow):
         self.controller.scan_accounts(self.ui.path_edit.text())
         self.current_configs["tags"] = self.config.get_all_accounts()
 
-    def _handle_edit_dialog_result(self, item: Optional[QListWidgetItem], dialog: EditLabelDialog) -> None:
+    def _handle_edit_dialog_result(
+        self, item: Optional[QListWidgetItem], dialog: EditLabelDialog
+    ) -> None:
         """分发标签编辑对话框完成的结果."""
         SettingsDialogHelper.handle_edit_dialog_result(
             item,
@@ -226,15 +282,13 @@ class SettingsWindow(QMainWindow):
             self.controller.model.refresh_display,
         )
 
-    @Slot()
-    def remove_item_event(self) -> None:
-        """删除账户项事件槽函数."""
-        self.controller.model.remove_current(lambda: self.update_current_config("tags", self.config.get_all_accounts()))
 
     @Slot()
     def select_client_event(self) -> None:
         """选择客户端文件事件槽函数."""
-        user_select, _ = QFileDialog.getOpenFileName(self, "选择客户端", "", "客户端主程序 (*.exe)")
+        user_select, _ = QFileDialog.getOpenFileName(
+            self, "选择客户端", "", "客户端主程序 (*.exe)"
+        )
         if user_select:
             client, path = os.path.basename(user_select), os.path.dirname(user_select)
             self.ui.client_edit.setText(client)

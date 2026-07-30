@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Callable, Generator, Optional
 
 from src.core.config import ConfigService
+from src.core.constants import LaunchMode
 from src.core.exceptions import TASException
 from src.core.logger import Logger
 from src.core.process_service import PsutilProcessService
@@ -59,8 +60,19 @@ class ProcessManager:
             if restart_on_exit:
                 self.start_process(wait=False)
 
-    def start_process(self, wait: bool = True) -> bool:
-        """启动客户端进程."""
+    def start_process(
+        self,
+        wait: bool = True,
+        tdata_name: Optional[str] = None,
+        force_symlink: bool = False,
+    ) -> bool:
+        """启动客户端进程.
+
+        Args:
+            wait: 是否等待进程就绪.
+            tdata_name: hook 模式下的自定义 tdata 目录名.
+            force_symlink: 强制使用链接模式（用于 hook 降级）.
+        """
         try:
             full_path = Path(self._config.path) / self._config.client
 
@@ -70,20 +82,55 @@ class ProcessManager:
 
             self._reap_popen()
 
+            if not force_symlink and self._config.launch_mode == LaunchMode.HOOK:
+                return self._start_with_hook(full_path, tdata_name, wait)
+            return self._start_with_symlink(full_path, wait)
+
+        except (FileNotFoundError, PermissionError) as e:
+            self._logger.error(f"启动失败: {e}")
+            return False
+        except Exception as e:
+            self._logger.error(f"启动过程出现未预期错误: {e}")
+            return False
+
+    def _start_with_hook(self, full_path: Path, tdata_name: Optional[str], wait: bool) -> bool:
+        """使用 hook 注入器启动客户端进程."""
+        from src.core.injecter import launch_with_hook
+
+        src_dir = Path(__file__).resolve().parent.parent
+        dll_path = src_dir / "hook" / "hook.dll"
+
+        if not dll_path.exists():
+            self._logger.error(f"找不到 hook DLL: {dll_path}")
+            return False
+
+        self._logger.debug(f"使用 hook 模式启动: {full_path}")
+
+        try:
+            pid = launch_with_hook(
+                telegram_path=str(full_path),
+                dll_path=str(dll_path),
+                logger=self._logger,
+                tdata_name=tdata_name,
+            )
+            if pid is None:
+                self._logger.error("hook 注入失败")
+                return False
+
+            self._logger.debug(f"hook 注入成功，PID={pid}")
+
             if not wait:
-                self._logger.debug(f"启动进程: {full_path}")
-                proc = subprocess.Popen(
-                    args=[str(full_path)],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    stdin=subprocess.DEVNULL,
-                    shell=False,
-                    start_new_session=True,
-                )
-                self._popen_ref = proc
                 return True
 
-            self._logger.debug(f"启动并等待就绪: {full_path}")
+            return self._wait_for_ready()
+        except Exception as e:
+            self._logger.error(f"hook 启动异常: {e}")
+            return False
+
+    def _start_with_symlink(self, full_path: Path, wait: bool) -> bool:
+        """使用普通方式启动客户端进程."""
+        if not wait:
+            self._logger.debug(f"启动进程: {full_path}")
             proc = subprocess.Popen(
                 args=[str(full_path)],
                 stdout=subprocess.DEVNULL,
@@ -93,42 +140,52 @@ class ProcessManager:
                 start_new_session=True,
             )
             self._popen_ref = proc
+            return True
 
-            try:
+        self._logger.debug(f"启动并等待就绪: {full_path}")
+        proc = subprocess.Popen(
+            args=[str(full_path)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            shell=False,
+            start_new_session=True,
+        )
+        self._popen_ref = proc
+
+        return self._wait_for_ready()
+
+    def _wait_for_ready(self) -> bool:
+        """等待进程就绪."""
+        try:
+            if self._popen_ref is not None:
                 import ctypes
 
-                res = ctypes.windll.user32.WaitForInputIdle(int(proc._handle), 10000)
+                res = ctypes.windll.user32.WaitForInputIdle(int(self._popen_ref._handle), 10000)
                 if res == 0:
                     return True
-            except Exception as e:
-                self._logger.debug(f"WaitForInputIdle 失败，使用备用检测方法: {e}")
-
-            max_time = 15
-            poll_interval = 0.1
-            elapsed = 0.0
-            success = False
-
-            while elapsed < max_time:
-                if proc.poll() is None:
-                    success = True
-                    break
-                if self._process_service.find_processes(self._config.client):
-                    success = True
-                    break
-                delay(poll_interval)
-                elapsed += poll_interval
-
-            if not success:
-                self._logger.warning(f"等待进程启动超时 ({max_time}s)")
-
-            return success
-
-        except (FileNotFoundError, PermissionError) as e:
-            self._logger.error(f"启动失败: {e}")
-            return False
         except Exception as e:
-            self._logger.error(f"启动过程出现未预期错误: {e}")
-            return False
+            self._logger.debug(f"WaitForInputIdle 失败，使用备用检测方法: {e}")
+
+        max_time = 15
+        poll_interval = 0.1
+        elapsed = 0.0
+        success = False
+
+        while elapsed < max_time:
+            if self._popen_ref is not None and self._popen_ref.poll() is None:
+                success = True
+                break
+            if self._process_service.find_processes(self._config.client):
+                success = True
+                break
+            delay(poll_interval)
+            elapsed += poll_interval
+
+        if not success:
+            self._logger.warning(f"等待进程启动超时 ({max_time}s)")
+
+        return success
 
     def kill_process(self, client: str) -> bool:
         """杀死指定客户端进程."""

@@ -3,14 +3,21 @@
 ################################################################################
 ## Form generated from reading UI file 'settings.ui'
 ##
-## Created by: Qt User Interface Compiler version 6.11.0
+## Created by: Qt User Interface Compiler version 6.11.1
 ##
 ## WARNING! All changes made in this file will be lost when recompiling UI file!
 ################################################################################
 
-from PySide6.QtCore import QCoreApplication, QMetaObject, QRect, QSize
-from PySide6.QtWidgets import QCheckBox, QLabel, QLineEdit, QListWidget, QPushButton, QSizePolicy, QWidget
-
+from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,
+    QMetaObject, QObject, QPoint, QRect,
+    QSize, QTime, QUrl, Qt)
+from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
+    QFont, QFontDatabase, QGradient, QIcon,
+    QImage, QKeySequence, QLinearGradient, QPainter,
+    QPalette, QPixmap, QRadialGradient, QTransform)
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QLabel,
+    QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
+    QPushButton, QSizePolicy, QWidget)
 
 class Ui_setting(object):
     def setupUi(self, setting):
@@ -52,10 +59,7 @@ class Ui_setting(object):
         self.tags_widget.setGeometry(QRect(70, 80, 281, 121))
         self.search_account_button = QPushButton(self.central_widget)
         self.search_account_button.setObjectName(u"search_account_button")
-        self.search_account_button.setGeometry(QRect(360, 100, 75, 24))
-        self.del_button = QPushButton(self.central_widget)
-        self.del_button.setObjectName(u"del_button")
-        self.del_button.setGeometry(QRect(360, 130, 75, 24))
+        self.search_account_button.setGeometry(QRect(360, 80, 75, 24))
         self.cancel_button = QPushButton(self.central_widget)
         self.cancel_button.setObjectName(u"cancel_button")
         self.cancel_button.setGeometry(QRect(360, 210, 75, 24))
@@ -64,10 +68,16 @@ class Ui_setting(object):
         self.log_output.setGeometry(QRect(360, 170, 82, 20))
         self.version_label = QLabel(self.central_widget)
         self.version_label.setObjectName(u"version_label")
-        self.version_label.setGeometry(QRect(10, 200, 211, 16))
+        self.version_label.setGeometry(QRect(10, 220, 211, 16))
         self.finish_button = QPushButton(self.central_widget)
         self.finish_button.setObjectName(u"finish_button")
         self.finish_button.setGeometry(QRect(270, 210, 75, 24))
+        self.launch_mode_combo = QComboBox(self.central_widget)
+        self.launch_mode_combo.setObjectName(u"launch_mode_combo")
+        self.launch_mode_combo.setGeometry(QRect(360, 110, 75, 24))
+        self.fallback = QCheckBox(self.central_widget)
+        self.fallback.setObjectName(u"fallback")
+        self.fallback.setGeometry(QRect(360, 140, 82, 20))
         setting.setCentralWidget(self.central_widget)
 
         self.retranslateUi(setting)
@@ -100,10 +110,6 @@ class Ui_setting(object):
 #endif // QT_CONFIG(tooltip)
         self.search_account_button.setText(QCoreApplication.translate("setting", u"\u67e5\u627e\u8d26\u6237", None))
 #if QT_CONFIG(tooltip)
-        self.del_button.setToolTip(QCoreApplication.translate("setting", u"\u5220\u9664\u53c2\u6570", None))
-#endif // QT_CONFIG(tooltip)
-        self.del_button.setText(QCoreApplication.translate("setting", u"\u5220\u9664", None))
-#if QT_CONFIG(tooltip)
         self.cancel_button.setToolTip(QCoreApplication.translate("setting", u"\u4fdd\u5b58\u914d\u7f6e", None))
 #endif // QT_CONFIG(tooltip)
         self.cancel_button.setText(QCoreApplication.translate("setting", u"\u53d6\u6d88", None))
@@ -116,5 +122,12 @@ class Ui_setting(object):
         self.finish_button.setToolTip(QCoreApplication.translate("setting", u"\u4fdd\u5b58\u914d\u7f6e", None))
 #endif // QT_CONFIG(tooltip)
         self.finish_button.setText(QCoreApplication.translate("setting", u"\u4fdd\u5b58", None))
+#if QT_CONFIG(tooltip)
+        self.launch_mode_combo.setToolTip(QCoreApplication.translate("setting", u"\u9009\u62e9\u8d26\u6237\u5207\u6362\u7684\u542f\u52a8\u6a21\u5f0f", None))
+#endif // QT_CONFIG(tooltip)
+#if QT_CONFIG(tooltip)
+        self.fallback.setToolTip(QCoreApplication.translate("setting", u"\u63a7\u5236hook\u6a21\u5f0f\u5904\u7406\u5931\u8d25\u65f6\u662f\u5426\u964d\u56de\u94fe\u63a5\u6a21\u5f0f", None))
+#endif // QT_CONFIG(tooltip)
+        self.fallback.setText(QCoreApplication.translate("setting", u"\u964d\u7ea7\u5904\u7406", None))
     # retranslateUi
 

@@ -43,7 +43,7 @@ class TestAccountSwitcher:
 
             assert result is True
             mock_restore_default.assert_called_once()
-            mock_process_manager.start_process.assert_called_once_with(wait=True)
+            mock_process_manager.start_process.assert_called_once_with(wait=True, tdata_name='tdata-abc')
             mock_config.sync_all_account_paths.assert_called_once()
 
     def test_process_target_full_flow(self, mock_config, mock_process_manager):
@@ -215,3 +215,22 @@ class TestAccountSwitcher:
             mock_rename.assert_not_called()
             mock_rmtree.assert_not_called()
             mock_restore_default.assert_called_once_with(target_folder="tdata-default")
+
+    def test_hook_mode_fallback_disabled(self, mock_config, mock_process_manager):
+        """验证禁用 fallback 时，hook 模式启动失败不会触发降级处理。"""
+        from src.core.constants import LaunchMode
+
+        test_tag = "account1"
+        mock_config.tag = test_tag
+        mock_config.tags = {test_tag: {"id": "12345", "folder": "tdata-abc"}}
+        mock_config.default = "default_account"
+        mock_config.launch_mode = LaunchMode.HOOK
+        mock_config.fallback = False
+        mock_config.has_complete_keys.return_value = False
+        mock_process_manager.start_process.return_value = False
+
+        switcher = AccountSwitcher()
+        with patch.object(switcher, '_fallback_to_symlink') as mock_fallback:
+            result = switcher.process()
+            assert result is False
+            mock_fallback.assert_not_called()

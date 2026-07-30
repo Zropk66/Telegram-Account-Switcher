@@ -6,7 +6,7 @@ import time
 
 from main import VERSION
 
-TOOLCHAIN = ["mingw64", "msvc"][0]
+TOOLCHAIN = ["mingw64", "msvc"][1]
 BUILD_MODE = ["release", "preview", "debug"][0]
 
 

@@ -1,10 +1,20 @@
 """系统全局常量与配置默认值定义."""
 
+from enum import Enum
+
 # --- 应用元数据 ---
 APP_TITLE = "TAS"
 APP_VERSION = "2.0.0"
 SINGLE_INSTANCE_LOCK_NAME = "TelegramAccountSwitcher"
 MUTEX_PREFIX = "Global\\"
+
+
+class LaunchMode(Enum):
+    """账户切换启动模式."""
+
+    HOOK = "hook"
+    SYMLINK = "symlink"
+
 
 # --- 文件与目录名称 ---
 CONFIG_FILE = "configs.json"

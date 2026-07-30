@@ -16,6 +16,17 @@ def test_singleton_returns_same_instance(in_memory_config):
     assert config1 is config3
 
 
+def test_fallback_property_and_batch_update(in_memory_config):
+    """验证 fallback 配置字段的默认值、修改及批量更新。"""
+    assert in_memory_config.fallback is True
+
+    in_memory_config.fallback = False
+    assert in_memory_config.fallback is False
+
+    in_memory_config.batch_update({"fallback": True})
+    assert in_memory_config.fallback is True
+
+
 def test_batch_update_commits_on_success(in_memory_config):
     """验证批量更新在成功执行后配置已即时同步。"""
     in_memory_config.client = "Telegram.exe"
