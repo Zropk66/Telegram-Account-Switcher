@@ -52,20 +52,13 @@ jobs:
           cd src\hook
           compile.bat
 
-      - name: Generate Output Name
+      - name: Update Version
         id: generate-output
         shell: powershell
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-          # 运行版本号生成助手更新 constants.py 中的 APP_VERSION
           uv run python build_version.py
-          $PY_VER = uv run python -c "import sys;print(sys.version.split(' ')[0])"
           $VERSION = uv run python -c "from src.core.constants import APP_VERSION;print(APP_VERSION)"
-
-          $OUTPUT_NAME = "TAS_v${VERSION}_$($env:OS_ENV)_Py${PY_VER}_MSVC.exe"
-
-          echo "VERSION=$VERSION" >> $env:GITHUB_ENV
-          echo "OUTPUT_NAME=$OUTPUT_NAME" >> $env:GITHUB_ENV
           echo "version=$VERSION" >> $env:GITHUB_OUTPUT
 
       - name: Compile with Nuitka
