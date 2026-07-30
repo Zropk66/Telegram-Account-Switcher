@@ -13,9 +13,6 @@ env:
 jobs:
   build:
     runs-on: windows-latest
-    strategy:
-      matrix:
-        compiler: [mingw, msvc]
     outputs:
       version: ${{ steps.generate-output.outputs.version }}
 
@@ -76,9 +73,7 @@ jobs:
           $PY_VER = uv run python -c "import sys;print(sys.version.split(' ')[0])"
           $VERSION = uv run python -c "from src.core.constants import APP_VERSION;print(APP_VERSION)"
 
-          # 依据编译器区分后缀
-          $COMPILER_SUFFIX = if ("${{ matrix.compiler }}" -eq "mingw") { "MinGW" } else { "MSVC" }
-          $OUTPUT_NAME = "TAS_v${VERSION}_$($env:OS_ENV)_Py${PY_VER}_${COMPILER_SUFFIX}.exe"
+          $OUTPUT_NAME = "TAS_v${VERSION}_$($env:OS_ENV)_Py${PY_VER}_MSVC.exe"
 
           echo "VERSION=$VERSION" >> $env:GITHUB_ENV
           echo "OUTPUT_NAME=$OUTPUT_NAME" >> $env:GITHUB_ENV
@@ -86,18 +81,32 @@ jobs:
 
       - name: Compile with Nuitka
         run: |
-          $EXTRA_ARGS = @()
-          if ("${{ matrix.compiler }}" -eq "mingw") {
-              $EXTRA_ARGS += "--mingw64"
-          }
-          $EXTRA_ARGS += "--onefile-no-compression", "--assume-yes-for-downloads", "--standalone", "--onefile", "--windows-console-mode=disable", "--plugin-enable=upx", "--plugin-enable=pyside6", "--include-data-files=src/hook/hook.dll=src/hook/hook.dll", "--output-filename=${{ env.OUTPUT_NAME }}", "--output-dir=output", "--remove-output", "--lto=yes", "--windows-product-name=TAS", "--windows-product-version=${{ env.VERSION }}", "--windows-file-version=${{ env.VERSION }}", "--windows-file-description=Telegram Account Switcher", ".\launcher.py"
+          $EXTRA_ARGS = @(
+              "--onefile-no-compression",
+              "--assume-yes-for-downloads",
+              "--standalone",
+              "--onefile",
+              "--windows-console-mode=disable",
+              "--plugin-enable=upx",
+              "--plugin-enable=pyside6",
+              "--include-data-files=src/hook/hook.dll=src/hook/hook.dll",
+              "--output-filename=${{ env.OUTPUT_NAME }}",
+              "--output-dir=output",
+              "--remove-output",
+              "--lto=yes",
+              "--windows-product-name=TAS",
+              "--windows-product-version=${{ env.VERSION }}",
+              "--windows-file-version=${{ env.VERSION }}",
+              "--windows-file-description=Telegram Account Switcher",
+              ".\launcher.py"
+          )
           uv run python -m nuitka @EXTRA_ARGS
         shell: pwsh
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: build-${{ matrix.compiler }}
+          name: build-msvc
           path: output/*.exe
           retention-days: 7
 
