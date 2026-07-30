@@ -70,7 +70,7 @@ jobs:
 
       - name: Compile with Nuitka
         run: |
-          uv run python build.py
+          uv run python build.py --mode release --toolchain msvc
         shell: pwsh
 
       - name: Upload Artifact

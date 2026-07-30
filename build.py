@@ -1,13 +1,35 @@
 """打包脚本."""
 
+import argparse
+import platform
 import subprocess
 import sys
 import time
 
 from src.core.constants import APP_VERSION as VERSION
 
-TOOLCHAIN = ["mingw64", "msvc"][1]
+TOOLCHAIN = ["msvc", "mingw64"][0]
 BUILD_MODE = ["release", "preview", "debug"][0]
+
+
+def parse_args() -> argparse.Namespace:
+    """解析命令行参数."""
+    parser = argparse.ArgumentParser(description="TAS Build Script")
+    parser.add_argument(
+        "--mode",
+        "-m",
+        choices=["release", "preview", "debug"],
+        default=BUILD_MODE,
+        help="指定构建模式 (release/preview/debug)",
+    )
+    parser.add_argument(
+        "--toolchain",
+        "-t",
+        choices=["msvc", "mingw64"],
+        default=TOOLCHAIN,
+        help="指定工具链 (msvc/mingw64)",
+    )
+    return parser.parse_args()
 
 
 def build_args(build_mode: str, toolchain: str) -> list[str]:
@@ -21,12 +43,19 @@ def build_args(build_mode: str, toolchain: str) -> list[str]:
     else:
         raise ValueError(f"Unsupported TOOLCHAIN: {toolchain}")
 
+    py_ver = platform.python_version()
+    os_name = "Windows" if sys.platform == "win32" else sys.platform.capitalize()
+    arch = "x64" if sys.maxsize > 2**32 else "x86"
+    toolchain_upper = toolchain.upper()
+
+    output_filename = f"TAS_v{VERSION}_{os_name}_{arch}_Py{py_ver}_{toolchain_upper}.exe"
+
     common_args = [
         "--onefile",
         "--assume-yes-for-downloads",
         "--plugin-enable=pyside6",
         "--include-data-files=src/hook/hook.dll=src/hook/hook.dll",
-        f"--output-filename=TAS_{build_mode}_{toolchain}_v{VERSION}",
+        f"--output-filename={output_filename}",
         "--output-dir=output",
         "--show-progress",
         "--jobs=8",
@@ -67,13 +96,8 @@ def run_build(build_mode: str, toolchain: str) -> int:
 
 def main() -> int:
     """主函数."""
-    if isinstance(BUILD_MODE, list):
-        for mode in BUILD_MODE:
-            run_build(mode, TOOLCHAIN)
-    else:
-        run_build(BUILD_MODE, TOOLCHAIN)
-
-    return 0
+    args = parse_args()
+    return run_build(args.mode, args.toolchain)
 
 
 if __name__ == "__main__":
