@@ -3,6 +3,7 @@ name: Build & Release
 on:
   push:
     branches: [ v2 ]
+    tags: [ 'v*' ]
   workflow_dispatch:
 
 env:
@@ -14,8 +15,7 @@ jobs:
   build:
     runs-on: windows-latest
     outputs:
-      version: ${{ steps.generate-output.outputs.version }}
-
+      version: ${{ steps.get-version.outputs.version }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -37,6 +37,14 @@ jobs:
         run: |
           uv sync --no-dev
 
+      - name: Get App Version
+        id: get-version
+        shell: powershell
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $VERSION = uv run python -c "from src.core.constants import APP_VERSION;print(APP_VERSION)"
+          echo "version=$VERSION" >> $env:GITHUB_OUTPUT
+
       - name: Install Nuitka
         run: |
           uv pip install 'nuitka[onefile]'
@@ -51,15 +59,6 @@ jobs:
         run: |
           cd src\hook
           compile.bat
-
-      - name: Update Version
-        id: generate-output
-        shell: powershell
-        run: |
-          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-          uv run python build_version.py
-          $VERSION = uv run python -c "from src.core.constants import APP_VERSION;print(APP_VERSION)"
-          echo "version=$VERSION" >> $env:GITHUB_OUTPUT
 
       - name: Compile with Nuitka
         run: |
@@ -90,7 +89,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: ./artifacts/*.exe
-          name: ${{ needs.build.outputs.version }}
+          name: v${{ needs.build.outputs.version }}
           tag_name: v${{ needs.build.outputs.version }}
           generate_release_notes: true
           draft: false
