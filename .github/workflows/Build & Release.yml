@@ -21,18 +21,18 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           architecture: ${{ env.BUILD_ARCH }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v8
+        uses: astral-sh/setup-uv@v5
         with:
           enable-cache: false
 
@@ -80,7 +80,7 @@ jobs:
         shell: pwsh
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: build-${{ matrix.compiler }}
           path: output/*.exe
@@ -93,17 +93,18 @@ jobs:
       contents: write
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           path: ./artifacts
           pattern: build-*
           merge-multiple: true
 
       - name: Create Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@v2
         with:
           files: ./artifacts/*.exe
           name: ${{ needs.build.outputs.version }}
           tag_name: v${{ needs.build.outputs.version }}
+          generate_release_notes: true
           draft: false
           prerelease: false
