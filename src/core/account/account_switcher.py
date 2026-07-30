@@ -168,7 +168,7 @@ class AccountSwitcher:
         self.logger.debug(f"正在准备切换到账户: {tag}")
         if is_hook:
             self.logger.debug("使用 hook 模式启动进程")
-            spawn_time = datetime.now()
+            spawn_time = datetime.now()  # noqa: DTZ005
             success = self._process_manager.start_process(wait=True, tdata_name=target_folder)
             if not success and self._config.hook_fallback:
                 success = self._fallback_to_symlink(

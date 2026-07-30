@@ -85,7 +85,7 @@ class CLIController:
 
             return True
         except Exception as e:
-            self.logger.exception(f"配置验证失败: {e}", e, popup=True)
+            self.logger.error(f"配置验证失败: {e}", popup=True)
             return False
 
     def _apply_args(self, args: argparse.Namespace) -> Optional[str]:

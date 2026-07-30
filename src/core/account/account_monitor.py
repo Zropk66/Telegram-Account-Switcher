@@ -168,7 +168,7 @@ class AccountMonitor:
                                     self.logger.exception("登录回调执行失败", e)
                 else:
                     if not is_logged_in:
-                        self.logger.error("检测到 Telegram 在登录成功前意外关闭")
+                        self.logger.warning("检测到 Telegram 在登录成功前意外关闭")
 
                     if self.tag and self.tag != self.config.default:
                         if monitor_started:

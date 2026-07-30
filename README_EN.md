@@ -7,19 +7,22 @@ English | [简体中文](README.md)
 ![Version](https://img.shields.io/badge/Latest-v2.0.0-brightgreen)
 ![License](https://img.shields.io/github/license/Zropk66/Telegram-Account-Switcher)
 
-A tool for quickly switching and managing multiple Telegram accounts on Windows.
+A tool for quickly switching and managing multiple Telegram accounts on Windows with high performance. Supports both Symlink and DLL Hook launch modes for flexibility and security.
 
 ## Features
 
-- **Multi-account Switching**: Quickly switch between different Telegram accounts
-- **Encryption Support**: Protect account data with AES-256 encryption
-- **Process Monitoring**: Real-time monitoring of Telegram process status
-- **Auto Recovery**: Automatically recover account status after abnormal interruption
+- **Dual Launch Mode Support**:
+  - **Symlink Mode**: Zero-copy account switching by redirecting the `tdata` symbolic link.
+  - **Hook Mode (DLL Injection)**: Directly passes data directories to Telegram via DLL injection.
+- **Fallback Protection (Hook Fallback)**: Automatically falls back to Symlink mode if Hook injection fails.
+- **Data Encryption**: Encrypts sensitive Telegram `key_datas` files using AES-256-GCM.
+- **Credential Backup & Key Login**: Extracts and backs up credentials (`key`/`identity`/`info`) for passwordless login recovery.
+- **Process & Event Monitoring**: Monitors Telegram process lifecycles and `user_data/configs` login status in real-time.
 
 ## Requirements
 
-- Python 3.12
-- Windows 10/11
+- Python 3.12+ (managed with `uv`)
+- Windows 10/11 (64-bit)
 
 ## Quick Start
 
@@ -31,138 +34,81 @@ cd Telegram-Account-Switcher
 # Install dependencies
 uv sync
 
-# Build the program
-python build.py
-# Or use nuitka directly
-nuitka --mingw64 --standalone --onefile --windows-console-mode=disable --plugin-enable=pyside6 --output-filename=TAS --output-dir=output --remove-output --lto=yes --windows-product-name=TAS --windows-product-version=2.0.0 --windows-file-version=2.0.0 --windows-file-description="Telegram Account Switcher" .\launcher.py
+# (Optional) Recompile hook.dll: Run inside "x64 Native Tools Command Prompt for VS":
+# cd src/hook && compile.bat
 
-# Run the program
-python TAS.exe
+# Build executable (output to output/TAS.exe)
+python build.py
+
+# Run launcher
+python launcher.py
 ```
 
 After building, the executable will be located at `output/TAS.exe`.
 
 ## Command Line Arguments
 
-| Argument         | Short    | Description                 | Example                       |
-|------------------|----------|-----------------------------|-------------------------------|
-| --version        | -v       | Show version                | `TAS.exe -v`                  |
-| --settings       | -c       | Open settings window        | `TAS.exe -c`                  |
-| --switch [TAG]   | -s [TAG] | Switch to specified account | `TAS.exe -s tag1`             |
-| --tag [TAG]      | -t [TAG] | Specify tag to operate on   | `TAS.exe -e -t tag1 -p password` |
-| --key-login      | -k       | Force key login             | `TAS.exe -s tag1 -k`          |
-| --help           | -h       | Show help                   | `TAS.exe -h`                  |
-| --encrypt        | -e       | Encrypt all account data    | `TAS.exe -e -p password`      |
-| --decrypt        | -d       | Decrypt all account data    | `TAS.exe -d -p password`      |
-| --password [PWD] | -p [PWD] | Specify encryption password | `TAS.exe -s tag1 -p password` |
+| Argument         | Short    | Description                         | Example                           |
+|------------------|----------|-------------------------------------|-----------------------------------|
+| --version        | -v       | Show version                        | `TAS.exe -v`                      |
+| --settings       | -c       | Open GUI settings window            | `TAS.exe -c`                      |
+| --switch [TAG]   | -s [TAG] | Switch to specified account         | `TAS.exe -s tag1`                 |
+| --tag [TAG]      | -t [TAG] | Specify tag for operation           | `TAS.exe -e -t tag1 -p password`  |
+| --key-login      | -k       | Force login using backed-up keys    | `TAS.exe -s tag1 -k`              |
+| --debug          |          | Enable DEBUG log output             | `TAS.exe --debug`                 |
+| --encrypt        | -e       | Encrypt account data                | `TAS.exe -e -p password`          |
+| --decrypt        | -d       | Decrypt account data                | `TAS.exe -d -p password`          |
+| --password [PWD] | -p [PWD] | Specify encryption/decryption pwd   | `TAS.exe -s tag1 -p password`     |
+| --help           | -h       | Show help                           | `TAS.exe -h`                      |
 
-## Usage Guide
-
-### Directory Structure
+## Directory Structure & Tag Identification
 
 ```
 Telegram/
-├── tdata/                  # Currently active account
-│   ├── tas_tag             # Tag identifier file (content is the tag name)
-│   ├── key_datas/          # Account key data
-│   ├── D877F783D5D3EF8Cs/  # Account identity data
-│   └── D877F783D5D3EF8C/   # Account settings data
-├── D877F783D5D3EF8C*/      # Other accounts (folder names are auto-generated by Telegram, arbitrary)
-│   ├── tas_tag             # Tag identifier file (content is the corresponding tag name)
-│   ├── key_datas/          # Encrypted account data
+├── Telegram.exe            # Telegram executable
+├── tdata/                  # Active account symbolic link
+├── tdata-account1/         # Account 1 folder
+│   ├── tas_tag             # Tag identifier file (contains tag name)
+│   ├── key_datas/          # Account key data (supports AES-256)
 │   └── ...
+├── tdata-account2/         # Account 2 folder
 └── ...
 ```
 
-> Each account folder contains a `tas_tag` file whose content is the account's tag name. TAS identifies accounts by reading `tas_tag` rather than relying on folder names.
-
-### Basic Operations
-
-```bash
-# Start the program
-python TAS.exe
-
-# Switch to specified account
-python TAS.exe -s tag1
-
-# Open settings window
-python TAS.exe --settings
-
-# Show version
-python TAS.exe -v
-```
-
-### Encryption Operations
-
-```bash
-# Encrypt all accounts
-TAS.exe -e -p [password]
-
-# Decrypt all accounts
-TAS.exe -d -p [password]
-```
-
-### Switching Accounts
-
-1. Run `TAS.exe -s [tag_name] -p [password]`
-2. The program will automatically close the current Telegram instance
-3. Switch to and start the target account
+> Each account directory contains a `tas_tag` file. TAS identifies account tags by reading `tas_tag` contents rather than relying on folder names.
 
 ## Configuration File
 
-The first run will automatically create a `configs.json` configuration file:
+Running the app automatically creates `configs.json`:
 
 ```json
 {
-  "client": "Telegram.exe",
-  "path": "C:/Path/To/Telegram",
-  "default": "main",
-  "tags": [
-    "tag1",
-    "tag2"
-  ],
-  "log_output": true
+    "client": "Telegram.exe",
+    "path": "D:/Program Files/Telegram",
+    "default": "main_account",
+    "tags": {
+        "tag1": {
+            "id": "1001",
+            "folder": "tdata-tag1",
+            "info": "...",
+            "identity": "...",
+            "key": "..."
+        }
+    },
+    "log_output": true,
+    "launch_mode": "symlink",
+    "hook_fallback": true
 }
 ```
 
-## Notes
+* `launch_mode`: Launch mode, options are `symlink` or `hook`.
+* `hook_fallback`: Whether to automatically fall back to `symlink` mode when `hook` mode launch fails (default `true`).
 
-- **First Run**: The first run will prompt you to configure the Telegram client path
-- **Account Data**: Encrypted account data is stored in the `key_datas` file
-- **Log File**: Runtime logs are saved in `TAS.log`
-- **Permissions**: If you encounter permission issues, try running as administrator
+## Troubleshooting & Notes
 
-## System Resources
-
-- **Memory Usage**: ~40MB idle
-- **Disk Space**: ~1-2MB per account
-
-## Troubleshooting
-
-1. **Unable to find client**: Check if the path in `configs.json` is correct
-2. **Switching failed**: Ensure Telegram is completely closed before attempting to switch
-3. **Encryption failed**: Confirm the password is correct and account data is not corrupted
-
-## FAQ
-
-**Q: How long does it take to switch accounts?**
-A: Usually takes 3-5 seconds to complete account data copying and process startup.
-
-**Q: How to add a new account?**
-A: Add a new tag in the settings window, or manually edit the `tags` list in `configs.json`.
-
-**Q: Is encryption secure?**
-A: Uses AES-256 encryption, strong passwords are recommended.
-
-## Contributing
-
-Issue reports and Pull Requests are welcome!
-
-1. Fork this repository
-2. Create a feature branch `git checkout -b feature/your-feature`
-3. Commit your changes `git commit -m "feat: add new feature"`
-4. Push to the branch `git push origin feature/your-feature`
-5. Create a Pull Request
+1. **Debug Logging**: Logs default to `INFO` level. Pass `--debug` to inspect detailed execution traces or check `TAS.log`.
+2. **Symlink Permissions**: Creating symbolic links in Windows requires developer mode or administrator permissions.
+3. **Hook Fallback**: If DLL injection is blocked by anti-virus software, enable `hook_fallback` for automatic fallback.
 
 ## License
 

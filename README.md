@@ -7,19 +7,22 @@
 ![Version](https://img.shields.io/badge/Latest-v2.0.0-brightgreen)
 ![License](https://img.shields.io/github/license/Zropk66/Telegram-Account-Switcher)
 
-一个用于在 Windows 上快速切换和管理多个 Telegram 账户的工具。
+一个用于在 Windows 上快速高效切换和管理多个 Telegram 账户的工具。支持符号链接（Symlink）与 Hook 注入两种启动模式，兼具安全性与高效体验。
 
 ## 功能特性
 
-- **多账户切换**：快速在不同 Telegram 账户之间切换
-- **加密支持**：使用 AES-256 加密保护账户数据
-- **进程监控**：实时监控 Telegram 进程状态
-- **自动恢复**：异常中断后自动恢复账户状态
+- **双启动模式支持**：
+  - **符号链接模式（Symlink）**：通过重定向 `tdata` 符号链接完成零拷贝账户切换。
+  - **Hook 注入模式（DLL Hook）**：直接注入 Telegram 参数指定数据目录，免去快捷重定向。
+- **降级保护机制（Hook Fallback）**：Hook 启动失败时可自动平滑降级为软链接模式启动。
+- **加密保护**：基于 AES-256-GCM 算法加密 Telegram 敏感 `key_datas` 数据。
+- **登录凭证备份与恢复**：支持凭证（Key/Identity/Info）提取与无密码重新登录重建。
+- **精准进程与文件监控**：实时监控 Telegram 进程生命周期与 `user_data/configs` 登录状态，退出自动安全落盘。
 
 ## 环境要求
 
-- Python 3.12
-- Windows 10/11
+- Python 3.12+ (使用 `uv` 依赖管理)
+- Windows 10/11 (64-bit)
 
 ## 快速开始
 
@@ -31,138 +34,81 @@ cd Telegram-Account-Switcher
 # 安装依赖
 uv sync
 
-# 打包程序
+# (可选) 重新编译 hook.dll：请在 "x64 Native Tools Command Prompt for VS" 终端中运行：
+# cd src/hook && compile.bat
+
+# 打包程序 (自动生成到 output/TAS.exe)
 python build.py
-# 或直接使用 nuitka
-nuitka --mingw64 --standalone --onefile --windows-console-mode=disable --plugin-enable=pyside6 --output-filename=TAS --output-dir=output --remove-output --lto=yes --windows-product-name=TAS --windows-product-version=2.0.0 --windows-file-version=2.0.0 --windows-file-description="Telegram Account Switcher" .\launcher.py
 
 # 运行程序
-python TAS.exe
+python launcher.py
 ```
 
 打包完成后，可执行文件位于 `output/TAS.exe`。
 
 ## 命令行参数
 
-| 参数               | 短参数      | 说明       | 示例                               |
-|------------------|----------|----------|----------------------------------|
-| --version        | -v       | 查看版本     | `TAS.exe -v`                     |
-| --settings       | -c       | 打开设置窗口   | `TAS.exe -c`                     |
-| --switch [TAG]   | -s [TAG] | 切换到指定账户  | `TAS.exe -s tag1`                |
-| --tag [TAG]      | -t [TAG] | 指定要操作的标签 | `TAS.exe -e -t tag1 -p password` |
-| --key-login      | -k       | 强制Key登录  | `TAS.exe -s tag1 -k`             |
-| --help           | -h       | 查看帮助     | `TAS.exe -h`                     |
-| --encrypt        | -e       | 加密所有账户数据 | `TAS.exe -e -p password`         |
-| --decrypt        | -d       | 解密所有账户数据 | `TAS.exe -d -p password`         |
-| --password [PWD] | -p [PWD] | 指定加密密码   | `TAS.exe -s tag1 -p password`    |
+| 参数               | 短参数      | 说明                           | 示例                               |
+|------------------|----------|------------------------------|----------------------------------|
+| --version        | -v       | 查看版本                         | `TAS.exe -v`                     |
+| --settings       | -c       | 打开 GUI 设置窗口                   | `TAS.exe -c`                     |
+| --switch [TAG]   | -s [TAG] | 切换并启动指定账户                     | `TAS.exe -s tag1`                |
+| --tag [TAG]      | -t [TAG] | 指定要操作的标签                     | `TAS.exe -e -t tag1 -p password` |
+| --key-login      | -k       | 强制使用备份 Key 重新登录               | `TAS.exe -s tag1 -k`             |
+| --debug          |          | 启用 DEBUG 调试日志输出              | `TAS.exe --debug`                |
+| --encrypt        | -e       | 加密账户数据                       | `TAS.exe -e -p password`         |
+| --decrypt        | -d       | 解密账户数据                       | `TAS.exe -d -p password`         |
+| --password [PWD] | -p [PWD] | 指定加密/解密密码                    | `TAS.exe -s tag1 -p password`    |
+| --help           | -h       | 查看帮助信息                       | `TAS.exe -h`                     |
 
-## 使用说明
-
-### 目录结构
+## 目录结构与识别原理
 
 ```
 Telegram/
-├── tdata/                  # 当前使用的活跃账户
-│   ├── tas_tag             # 标签标识文件（内容为 tag 名称）
-│   ├── key_datas/          # 账户密钥数据
-│   ├── D877F783D5D3EF8Cs/  # 账户身份数据
-│   └── D877F783D5D3EF8C/   # 账户设置数据
-├── tdata-2/                # 其他账户（名称任意）
-│   ├── tas_tag             # 标签标识文件（内容为对应的 tag 名称）
-│   ├── key_datas/          # 加密的账户数据
+├── Telegram.exe            # Telegram 客户端程序
+├── tdata/                  # 当前活跃账户软链接（指向目标账户目录）
+├── tdata-account1/         # 账户1 目录
+│   ├── tas_tag             # 账户标签标识文件（内容为对应 tag 名称）
+│   ├── key_datas/          # 账户密钥数据 (支持 AES-256 加密)
 │   └── ...
+├── tdata-account2/         # 账户2 目录
 └── ...
 ```
 
-> 每个账户文件夹内都有一个 `tas_tag` 文件，其内容即为该账户的标签名称。程序通过读取 `tas_tag` 来识别账户，而非依赖文件夹名。
+> 每个账户目录中都包含一个 `tas_tag` 标识文件。TAS 通过读取 `tas_tag` 的内容识别账户标签，而非依赖物理文件夹名称。
 
-### 基本操作
+## 配置文件说明
 
-```bash
-# 启动程序
-python TAS.exe
-
-# 切换到指定账户
-python TAS.exe -s tag1
-
-# 打开设置窗口
-python TAS.exe --settings
-
-# 查看版本
-python TAS.exe -v
-```
-
-### 加密操作
-
-```bash
-# 加密所有账户
-TAS.exe -e -p [密码]
-
-# 解密所有账户
-TAS.exe -d -p [密码]
-```
-
-### 切换账户
-
-1. 运行 `TAS.exe -s [标签名] -p [密码]`
-2. 程序会自动关闭当前 Telegram 实例
-3. 切换并启动目标账户
-
-## 配置文件
-
-首次运行会自动创建 `configs.json` 配置文件：
+首次运行会在应用根目录自动创建 `configs.json` 配置文件：
 
 ```json
 {
-  "client": "Telegram.exe",
-  "path": "C:/Path/To/Telegram",
-  "default": "main",
-  "tags": [
-    "tag1",
-    "tag2"
-  ],
-  "log_output": true
+    "client": "Telegram.exe",
+    "path": "D:/Program Files/Telegram",
+    "default": "main_account",
+    "tags": {
+        "tag1": {
+            "id": "1001",
+            "folder": "tdata-tag1",
+            "info": "...",
+            "identity": "...",
+            "key": "..."
+        }
+    },
+    "log_output": true,
+    "launch_mode": "symlink",
+    "hook_fallback": true
 }
 ```
 
-## 注意事项
+* `launch_mode`: 启动模式，可选 `symlink` (符号链接模式) 或 `hook` (DLL Hook 注入模式)。
+* `hook_fallback`: Hook 模式启动失败时，是否允许自动降级为软链接模式启动（默认 `true`）。
 
-- **首次运行**：首次运行会提示配置 Telegram 客户端路径
-- **账户数据**：加密后的账户数据存储在 `key_datas` 文件
-- **日志文件**：运行日志保存在 `TAS.log`
-- **权限要求**：如遇权限问题，请尝试以管理员身份运行
+## 注意事项与故障排除
 
-## 系统资源
-
-- **内存占用**：运行时内存占用约 40MB
-- **磁盘空间**：单个账户数据约 1-2MB
-
-## 故障排除
-
-1. **无法找到客户端**：检查 `configs.json` 中的路径是否正确
-2. **切换失败**：确保 Telegram 已完全关闭后再尝试切换
-3. **加密失败**：确认密码正确且账户数据未损坏
-
-## 常见问题
-
-**Q: 切换账户需要多长时间？**
-A: 通常 3-5 秒完成账户数据复制和进程启动。
-
-**Q: 如何添加新账户？**
-A: 在设置窗口中添加新标签，或手动编辑 `configs.json` 的 `tags` 列表。
-
-**Q: 加密安全吗？**
-A: 使用 AES-256 加密，建议设置强密码。
-
-## 贡献指南
-
-欢迎提交 Issue 和 Pull Request！
-
-1. Fork 本仓库
-2. 创建特性分支 `git checkout -b feature/your-feature`
-3. 提交更改 `git commit -m "feat: 添加新功能"`
-4. 推送分支 `git push origin feature/your-feature`
-5. 创建 Pull Request
+1. **调试日志**：默认仅输出 `INFO` 级日志，如遇启动或切换问题，可添加 `--debug` 参数运行查看详细跟踪信息或检查 `TAS.log`。
+2. **符号链接权限**：软链接模式创建符链接需要系统权限，建议以管理员身份运行程序或在 Windows 设置中启用“开发者模式”。
+3. **Hook 模式**：Hook 模式适用于不想频繁修改 `tdata` 软链接的场景；若 Hook 注入被安全软件拦截，可开启 `hook_fallback` 自动降级。
 
 ## 许可证
 

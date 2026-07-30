@@ -25,11 +25,11 @@ class ConfigService:
         "client": TELEGRAM_EXE,
         "path": "",
         "default": "",
-        "tags": {},
         "log_output": True,
         "agreed_to_decrypt": False,
         "launch_mode": LaunchMode.SYMLINK.value,
         "hook_fallback": True,
+        "tags": {},
     }
 
     _instance = None

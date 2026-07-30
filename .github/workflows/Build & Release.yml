@@ -2,7 +2,7 @@ name: Build & Release
 
 on:
   push:
-    branches: [ main ]
+    branches: [ v2 ]
   workflow_dispatch:
 
 env:
@@ -63,7 +63,7 @@ jobs:
           # 运行版本号生成助手更新 constants.py 中的 APP_VERSION
           uv run python build_version.py
           $PY_VER = uv run python -c "import sys;print(sys.version.split(' ')[0])"
-          $VERSION = uv run python -c "from src.main import VERSION;print(VERSION)"
+          $VERSION = uv run python -c "from src.core.constants import APP_VERSION;print(APP_VERSION)"
           
           # 依据编译器区分后缀
           $COMPILER_SUFFIX = if ("${{ matrix.compiler }}" -eq "mingw") { "MinGW" } else { "MSVC" }
@@ -76,7 +76,7 @@ jobs:
       - name: Compile with Nuitka
         run: |
           $COMPILER_FLAG = if ("${{ matrix.compiler }}" -eq "mingw") { "--mingw64" } else { "" }
-          uv run python -m nuitka $COMPILER_FLAG --onefile-no-compression --assume-yes-for-downloads --standalone --onefile --windows-console-mode=disable --plugin-enable=upx --plugin-enable=pyside6 --output-filename=${{ env.OUTPUT_NAME }} --output-dir=output --remove-output --lto=yes --windows-product-name=TAS --windows-product-version=${{ env.VERSION }} --windows-file-version=${{ env.VERSION }} --windows-file-description="Telegram Account Switcher" .\launcher.py
+          uv run python -m nuitka $COMPILER_FLAG --onefile-no-compression --assume-yes-for-downloads --standalone --onefile --windows-console-mode=disable --plugin-enable=upx --plugin-enable=pyside6 --include-data-files=src/hook/hook.dll=src/hook/hook.dll --output-filename=${{ env.OUTPUT_NAME }} --output-dir=output --remove-output --lto=yes --windows-product-name=TAS --windows-product-version=${{ env.VERSION }} --windows-file-version=${{ env.VERSION }} --windows-file-description="Telegram Account Switcher" .\launcher.py
         shell: pwsh
 
       - name: Upload Artifact

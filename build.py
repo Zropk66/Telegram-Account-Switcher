@@ -4,7 +4,7 @@ import subprocess
 import sys
 import time
 
-from main import VERSION
+from src.core.constants import APP_VERSION as VERSION
 
 TOOLCHAIN = ["mingw64", "msvc"][1]
 BUILD_MODE = ["release", "preview", "debug"][0]
@@ -24,6 +24,7 @@ def build_args(build_mode: str, toolchain: str) -> list[str]:
     common_args = [
         "--onefile",
         "--plugin-enable=pyside6",
+        "--include-data-files=src/hook/hook.dll=src/hook/hook.dll",
         f"--output-filename=TAS_{build_mode}_{toolchain}_v{VERSION}",
         "--output-dir=output",
         "--show-progress",

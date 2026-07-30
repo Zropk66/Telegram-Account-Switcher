@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.obj
 
 # 开发工具与编辑器配置
 .idea/
@@ -34,6 +35,7 @@ nuitka-crash-report.xml
 # 本地开发临时文件与目录
 app/
 docs/
+private_compile.bat
 
 # 项目特定文件与目录
 configs.json
