@@ -273,27 +273,34 @@ def main() -> int:
 
     if IPCClient.send_command(switch_target):
         logger.info(f"已成功将切换目标 '{switch_target}' 发送至主 TAS 进程处理。")
-        return 0
+        with suppress(Exception):
+            CONFIG.shutdown()
+        import os
+
+        os._exit(0)
 
     def handle_remote_command(payload: str) -> None:
-        try:
-            logger.info(f"收到远程多开指令目标: {payload}")
-            validated_tags = cli_controller._validate_tag(payload)
-            tags_list = [t.strip() for t in validated_tags.split(",") if t.strip()]
-            for current_tag in tags_list:
-                CONFIG.tag = current_tag
-                switcher = AccountSwitcher()
-                if switcher.process() and switcher.monitor:
-                    if active_app and active_app.monitor:
-                        active_app.monitor.register_callback(switcher.monitor.handle_process_status)
-                    t = threading.Thread(
-                        target=switcher.monitor.run,
-                        daemon=True,
-                        name=f"Monitor-{switcher.monitor.tag}",
-                    )
-                    t.start()
-        except Exception as e:
-            logger.error(f"处理远程指令发生错误: {e}")
+        def _execute() -> None:
+            try:
+                logger.info(f"收到远程多开指令目标: {payload}")
+                validated_tags = cli_controller._validate_tag(payload)
+                tags_list = [t.strip() for t in validated_tags.split(",") if t.strip()]
+                for current_tag in tags_list:
+                    CONFIG.tag = current_tag
+                    switcher = AccountSwitcher()
+                    if switcher.process() and switcher.monitor:
+                        if active_app and active_app.monitor:
+                            active_app.monitor.register_callback(switcher.monitor.handle_process_status)
+                        t = threading.Thread(
+                            target=switcher.monitor.run,
+                            daemon=True,
+                            name=f"Monitor-{switcher.monitor.tag}",
+                        )
+                        t.start()
+            except Exception as e:
+                logger.error(f"处理远程指令发生错误: {e}")
+
+        threading.Thread(target=_execute, daemon=True, name="IPC-Command-Handler").start()
 
     ipc_server = IPCServer(handle_remote_command, logger=logger)
     ipc_server.start()

@@ -165,25 +165,112 @@ class ProcessManager:
         """置顶特定账号的窗口."""
         pid = _hook_process_pool.get(target_folder)
         if not pid:
+            self._logger.debug(f"置顶跳过：进程池中无 '{target_folder}' 的 PID 记录")
             return
         try:
             import ctypes
+            from ctypes import wintypes
 
             user32 = ctypes.windll.user32
+            kernel32 = ctypes.windll.kernel32
+
+            user32.GetForegroundWindow.restype = wintypes.HWND
+            user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+            user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+            user32.IsWindowVisible.argtypes = [wintypes.HWND]
+            user32.IsWindowVisible.restype = wintypes.BOOL
+            user32.IsIconic.argtypes = [wintypes.HWND]
+            user32.IsIconic.restype = wintypes.BOOL
+            user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+            user32.ShowWindow.restype = wintypes.BOOL
+            user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+            user32.SetForegroundWindow.restype = wintypes.BOOL
+            user32.BringWindowToTop.argtypes = [wintypes.HWND]
+            user32.BringWindowToTop.restype = wintypes.BOOL
+            user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
+            user32.AttachThreadInput.restype = wintypes.BOOL
+            user32.EnumWindows.argtypes = [ctypes.c_void_p, wintypes.LPARAM]
+            user32.EnumWindows.restype = wintypes.BOOL
+            user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+            user32.GetWindowTextLengthW.restype = ctypes.c_int
+            user32.keybd_event.argtypes = [wintypes.BYTE, wintypes.BYTE, wintypes.DWORD, ctypes.c_void_p]
+            kernel32.GetCurrentThreadId.restype = wintypes.DWORD
+
+            target_pids = {pid}
+            try:
+                import psutil
+
+                parent_proc = psutil.Process(pid)
+                for child in parent_proc.children(recursive=True):
+                    target_pids.add(child.pid)
+            except Exception:
+                pass
+
+            self._logger.debug(f"置顶搜索 PID 集合: {target_pids}")
+
+            target_hwnd: Optional[int] = None
 
             def enum_windows_callback(hwnd, extra):
-                length = user32.GetWindowTextLengthW(hwnd)
-                if length > 0:
-                    window_pid = ctypes.c_ulong()
-                    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(window_pid))
-                    if window_pid.value == pid and user32.IsWindowVisible(hwnd):
-                        user32.ShowWindow(hwnd, 9)
-                        user32.SetForegroundWindow(hwnd)
-                        return False
+                nonlocal target_hwnd
+                if not user32.IsWindowVisible(hwnd):
+                    return True
+                if user32.GetWindowTextLengthW(hwnd) <= 0:
+                    return True
+                window_pid = wintypes.DWORD()
+                user32.GetWindowThreadProcessId(hwnd, ctypes.byref(window_pid))
+                if window_pid.value in target_pids:
+                    target_hwnd = hwnd
+                    return False
                 return True
 
-            WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+            WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
             user32.EnumWindows(WNDENUMPROC(enum_windows_callback), 0)
+
+            if not target_hwnd:
+                self._logger.debug(f"未找到 PID={target_pids} 对应的可视窗口")
+                return
+
+            self._logger.debug(f"找到目标窗口 HWND={target_hwnd}")
+
+            # 最小化状态先还原
+            if user32.IsIconic(target_hwnd):
+                user32.ShowWindow(target_hwnd, 9)  # SW_RESTORE
+
+            current_tid = kernel32.GetCurrentThreadId()
+            foreground_hwnd = user32.GetForegroundWindow()
+            foreground_tid = user32.GetWindowThreadProcessId(foreground_hwnd, None) if foreground_hwnd else 0
+            target_tid = user32.GetWindowThreadProcessId(target_hwnd, None)
+
+            self._logger.debug(
+                f"current_tid={current_tid} foreground_tid={foreground_tid} target_tid={target_tid}"
+            )
+
+            # 先模拟 Alt 键释放前台锁，必须在 SetForegroundWindow 之前
+            VK_MENU = 0x12  # noqa: N806
+            KEYEVENTF_KEYUP = 0x0002  # noqa: N806
+            user32.keybd_event(VK_MENU, 0, 0, 0)
+            user32.keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0)
+
+            # 将调用线程的输入队列附加到前台线程和目标线程，绕过前台锁
+            attached_fg = False
+            attached_target = False
+            if foreground_tid and foreground_tid != current_tid:
+                attached_fg = bool(user32.AttachThreadInput(current_tid, foreground_tid, True))
+            if target_tid and target_tid != current_tid:
+                attached_target = bool(user32.AttachThreadInput(current_tid, target_tid, True))
+
+            self._logger.debug(f"AttachThreadInput: fg={attached_fg} target={attached_target}")
+
+            try:
+                user32.BringWindowToTop(target_hwnd)
+                result = bool(user32.SetForegroundWindow(target_hwnd))
+            finally:
+                if attached_fg:
+                    user32.AttachThreadInput(current_tid, foreground_tid, False)
+                if attached_target:
+                    user32.AttachThreadInput(current_tid, target_tid, False)
+
+            self._logger.debug(f"SetForegroundWindow result={result} HWND={target_hwnd}")
         except Exception as e:
             self._logger.debug(f"置顶窗口异常: {e}")
 
