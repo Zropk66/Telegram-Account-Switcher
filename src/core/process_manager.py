@@ -17,6 +17,7 @@ from src.core.runtime import delay
 
 _should_reap: bool = True
 _active_managers = weakref.WeakSet()
+_hook_process_pool: dict[str, int] = {}
 
 
 def _set_should_reap(value: bool) -> None:
@@ -64,6 +65,7 @@ class ProcessManager:
         self,
         wait: bool = True,
         tdata_name: Optional[str] = None,
+        tray_name: Optional[str] = None,
         force_symlink: bool = False,
     ) -> bool:
         """启动客户端进程.
@@ -71,6 +73,7 @@ class ProcessManager:
         Args:
             wait: 是否等待进程就绪.
             tdata_name: hook 模式下的自定义 tdata 目录名.
+            tray_name: hook 模式下的托盘/窗口显示标签名.
             force_symlink: 强制使用链接模式（用于 hook 降级）.
         """
         try:
@@ -83,7 +86,7 @@ class ProcessManager:
             self._reap_popen()
 
             if not force_symlink and self._config.launch_mode == LaunchMode.HOOK:
-                return self._start_with_hook(full_path, tdata_name, wait)
+                return self._start_with_hook(full_path, tdata_name, tray_name, wait)
             return self._start_with_symlink(full_path, wait)
 
         except (FileNotFoundError, PermissionError) as e:
@@ -93,7 +96,13 @@ class ProcessManager:
             self._logger.error(f"启动过程出现未预期错误: {e}")
             return False
 
-    def _start_with_hook(self, full_path: Path, tdata_name: Optional[str], wait: bool) -> bool:
+    def _start_with_hook(
+        self,
+        full_path: Path,
+        tdata_name: Optional[str],
+        tray_name: Optional[str],
+        wait: bool,
+    ) -> bool:
         """使用 hook 注入器启动客户端进程."""
         from src.core.injecter import launch_with_hook
 
@@ -112,12 +121,16 @@ class ProcessManager:
                 dll_path=str(dll_path),
                 logger=self._logger,
                 tdata_name=tdata_name,
+                tray_name=tray_name,
+                isolate_appid=self._config.isolate_appid,
             )
             if pid is None:
                 self._logger.error("hook 注入失败")
                 return False
 
             self._logger.debug(f"hook 注入成功，PID={pid}")
+            if tdata_name:
+                _hook_process_pool[tdata_name] = pid
 
             if not wait:
                 return True
@@ -126,6 +139,53 @@ class ProcessManager:
         except Exception as e:
             self._logger.error(f"hook 启动异常: {e}")
             return False
+
+    def is_target_running(self, target_folder: str) -> bool:
+        """检查特定 target_folder 的 hook 实例是否在运行."""
+        pid = _hook_process_pool.get(target_folder)
+        if pid and not self._process_service.wait_for_process(pid, timeout=0.001):
+            return True
+
+        import psutil
+
+        client_name = self._config.client
+        for proc_info in self._process_service.find_processes(client_name):
+            try:
+                proc = psutil.Process(proc_info.pid)
+                env = proc.environ()
+                if env.get("TDATA_NAME") == target_folder:
+                    _hook_process_pool[target_folder] = proc_info.pid
+                    return True
+            except Exception:
+                continue
+
+        return False
+
+    def bring_to_foreground(self, target_folder: str) -> None:
+        """置顶特定账号的窗口."""
+        pid = _hook_process_pool.get(target_folder)
+        if not pid:
+            return
+        try:
+            import ctypes
+
+            user32 = ctypes.windll.user32
+
+            def enum_windows_callback(hwnd, extra):
+                length = user32.GetWindowTextLengthW(hwnd)
+                if length > 0:
+                    window_pid = ctypes.c_ulong()
+                    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(window_pid))
+                    if window_pid.value == pid and user32.IsWindowVisible(hwnd):
+                        user32.ShowWindow(hwnd, 9)
+                        user32.SetForegroundWindow(hwnd)
+                        return False
+                return True
+
+            WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+            user32.EnumWindows(WNDENUMPROC(enum_windows_callback), 0)
+        except Exception as e:
+            self._logger.debug(f"置顶窗口异常: {e}")
 
     def _start_with_symlink(self, full_path: Path, wait: bool) -> bool:
         """使用普通方式启动客户端进程."""
@@ -214,7 +274,7 @@ class ProcessManager:
                 killed = True
 
         if self._process_service.find_processes(client):
-            raise TASException(f"权限不足，无法终止进程: {client}.请手动关闭或以管理员身份运行.")
+            raise TASException(f"权限不足，无法终止进程: {client} 请手动关闭或以管理员身份运行.")
 
         return killed
 
@@ -306,6 +366,7 @@ class ProcessMonitor:
                 self.last_PID = None
                 return False
             else:
+                self._stop_event.wait(self.check_interval)
                 return True
 
         processes = self._process_service.find_processes(self.process_name)

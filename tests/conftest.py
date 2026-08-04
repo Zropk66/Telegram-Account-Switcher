@@ -107,6 +107,7 @@ def mock_process_manager():
     manager = MagicMock(spec=ProcessManager)
     manager.start_process.return_value = True
     manager.kill_process.return_value = True
+    manager.is_target_running.return_value = False
 
     from contextlib import contextmanager
 

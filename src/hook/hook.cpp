@@ -1,5 +1,8 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <shellapi.h>
+#include <propsys.h>
+#include <propkey.h>
 #include <string>
 #include <mutex>
 #include <stdio.h>
@@ -10,7 +13,9 @@
 namespace {
 
 std::wstring g_target = L"tdata";
+std::wstring g_trayName = L"";
 bool g_enabled = false;
+bool g_isolateAppId = false;
 
 // =====================================================================
 // Diagnostic logging
@@ -28,7 +33,7 @@ void DebugLog(const char* fmt, ...) {
 
 	std::lock_guard<std::mutex> lock(g_logMutex);
 	if (!g_logFile) {
-		fopen_s(&g_logFile, "hook_debug.log", "a");
+		fopen_s(&g_logFile, "hook.log", "a");
 		if (!g_logFile) return;
 	}
 	fputs(timebuf, g_logFile);
@@ -38,6 +43,10 @@ void DebugLog(const char* fmt, ...) {
 	va_end(ap);
 	fputc('\n', g_logFile);
 	fflush(g_logFile);
+}
+
+std::wstring GetTagSuffix() {
+	return !g_trayName.empty() ? g_trayName : g_target;
 }
 
 // =====================================================================
@@ -54,6 +63,36 @@ bool IsSeparator(wchar_t c) {
 bool RewritePath(LPCWSTR path, std::wstring &out) {
 	if (!path || !*path) return false;
 	if (!g_enabled) return false;
+
+	if (wcsncmp(path, L"\\\\.\\pipe\\", 9) == 0) {
+		out.assign(path);
+		out.append(L"_");
+		out.append(g_target);
+		return true;
+	}
+
+	const wchar_t* logPos = wcsstr(path, L"log.txt");
+	if (logPos != nullptr) {
+		const bool leftOk = (logPos == path) || IsSeparator(logPos[-1]);
+		if (leftOk) {
+			size_t prefixLen = logPos - path;
+			std::wstring prefix(path, prefixLen);
+			bool alreadyHasTarget = false;
+			if (prefix.size() >= g_target.size() + 1) {
+				wchar_t lastChar = prefix.back();
+				if (IsSeparator(lastChar)) {
+					std::wstring sub = prefix.substr(prefix.size() - 1 - g_target.size(), g_target.size());
+					if (sub == g_target) {
+						alreadyHasTarget = true;
+					}
+				}
+			}
+			if (!alreadyHasTarget) {
+				out = prefix + g_target + L"\\" + L"log.txt";
+				return true;
+			}
+		}
+	}
 
 	const auto &to = g_target;
 
@@ -119,6 +158,12 @@ using pfnSetFileAttributesW = BOOL(WINAPI*)(LPCWSTR, DWORD);
 using pfnFindFirstFileW = HANDLE(WINAPI*)(LPCWSTR, LPWIN32_FIND_DATAW);
 using pfnFindFirstFileExW = HANDLE(WINAPI*)(LPCWSTR, FINDEX_INFO_LEVELS, LPVOID, FINDEX_SEARCH_OPS, LPVOID, DWORD);
 using pfnCreateFile2 = HRESULT(WINAPI*)(LPCWSTR, DWORD, DWORD, DWORD, LPCREATEFILE2_EXTENDED_PARAMETERS);
+using pfnCreateNamedPipeW = HANDLE(WINAPI*)(LPCWSTR, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD, LPSECURITY_ATTRIBUTES);
+using pfnShell_NotifyIconW = BOOL(WINAPI*)(DWORD dwMessage, PNOTIFYICONDATAW lpData);
+using pfnShell_NotifyIconA = BOOL(WINAPI*)(DWORD dwMessage, PNOTIFYICONDATAA lpData);
+using pfnSetWindowTextW = BOOL(WINAPI*)(HWND hWnd, LPCWSTR lpString);
+using pfnSetCurrentProcessExplicitAppUserModelID = HRESULT(WINAPI*)(PCWSTR AppID);
+using pfnSHGetPropertyStoreForWindow = HRESULT(WINAPI*)(HWND hwnd, REFIID riid, void** ppv);
 
 pfnCreateFileW          o_CreateFileW = nullptr;
 pfnCreateDirectoryW      o_CreateDirectoryW = nullptr;
@@ -134,10 +179,24 @@ pfnSetFileAttributesW    o_SetFileAttributesW = nullptr;
 pfnFindFirstFileW        o_FindFirstFileW = nullptr;
 pfnFindFirstFileExW      o_FindFirstFileExW = nullptr;
 pfnCreateFile2           o_CreateFile2 = nullptr;
+pfnCreateNamedPipeW      o_CreateNamedPipeW = nullptr;
+pfnShell_NotifyIconW     o_Shell_NotifyIconW = nullptr;
+pfnShell_NotifyIconA     o_Shell_NotifyIconA = nullptr;
+pfnSetWindowTextW        o_SetWindowTextW = nullptr;
+pfnSetCurrentProcessExplicitAppUserModelID o_SetCurrentProcessExplicitAppUserModelID = nullptr;
+pfnSHGetPropertyStoreForWindow o_SHGetPropertyStoreForWindow = nullptr;
 
 // =====================================================================
 // raw callers
 // =====================================================================
+
+static HANDLE RawCreateNamedPipeW(pfnCreateNamedPipeW fn, LPCWSTR a, DWORD b, DWORD c, DWORD d, DWORD e, DWORD f, DWORD g, LPSECURITY_ATTRIBUTES h) {
+	__try {
+		return fn(a, b, c, d, e, f, g, h);
+	} __except (EXCEPTION_EXECUTE_HANDLER) {
+		return INVALID_HANDLE_VALUE;
+	}
+}
 
 static HANDLE SafeCreateFileW(pfnCreateFileW fn, LPCWSTR a, DWORD b, DWORD c,
 		LPSECURITY_ATTRIBUTES d, DWORD e, DWORD f, HANDLE g) {
@@ -335,6 +394,133 @@ HRESULT WINAPI h_CreateFile2(LPCWSTR a, DWORD b, DWORD c, DWORD d, LPCREATEFILE2
 	return SafeCreateFile2(o_CreateFile2, p.ptr, b, c, d, e);
 }
 
+HANDLE WINAPI h_CreateNamedPipeW(LPCWSTR a, DWORD b, DWORD c, DWORD d, DWORD e, DWORD f, DWORD g, LPSECURITY_ATTRIBUTES h) {
+	PathBuf p(a);
+	return RawCreateNamedPipeW(o_CreateNamedPipeW, p.ptr, b, c, d, e, f, g, h);
+}
+
+BOOL WINAPI h_Shell_NotifyIconW(DWORD dwMessage, PNOTIFYICONDATAW lpData) {
+	if (g_enabled && lpData && (dwMessage == NIM_ADD || dwMessage == NIM_MODIFY)) {
+		if (lpData->uFlags & NIF_TIP) {
+			std::wstring tag = GetTagSuffix();
+			std::wstring origTip = lpData->szTip;
+
+			if (!origTip.empty() && origTip.find(L"- [" + tag + L"]") == std::wstring::npos) {
+				std::wstring newTip = origTip + L" - [" + tag + L"]";
+				if (newTip.size() < 128) {
+					wcscpy_s(lpData->szTip, newTip.c_str());
+				}
+			} else if (origTip.empty()) {
+				std::wstring newTip = L"Telegram - [" + tag + L"]";
+				if (newTip.size() < 128) {
+					wcscpy_s(lpData->szTip, newTip.c_str());
+				}
+			}
+		}
+	}
+	return o_Shell_NotifyIconW ? o_Shell_NotifyIconW(dwMessage, lpData) : FALSE;
+}
+
+BOOL WINAPI h_Shell_NotifyIconA(DWORD dwMessage, PNOTIFYICONDATAA lpData) {
+	if (g_enabled && lpData && (dwMessage == NIM_ADD || dwMessage == NIM_MODIFY)) {
+		if (lpData->uFlags & NIF_TIP) {
+			std::wstring tagW = GetTagSuffix();
+			std::string origTip = lpData->szTip;
+
+			char tagA[128] = { 0 };
+			WideCharToMultiByte(CP_ACP, 0, tagW.c_str(), -1, tagA, sizeof(tagA), NULL, NULL);
+			std::string tagStr(tagA);
+
+			if (!origTip.empty() && origTip.find("- [" + tagStr + "]") == std::string::npos) {
+				std::string newTip = origTip + " - [" + tagStr + "]";
+				if (newTip.size() < 128) {
+					strcpy_s(lpData->szTip, newTip.c_str());
+				}
+			}
+		}
+	}
+	return o_Shell_NotifyIconA ? o_Shell_NotifyIconA(dwMessage, lpData) : FALSE;
+}
+
+BOOL WINAPI h_SetWindowTextW(HWND hWnd, LPCWSTR lpString) {
+	if (g_enabled && lpString) {
+		std::wstring tag = GetTagSuffix();
+		std::wstring origText = lpString;
+		if (!origText.empty() && origText.find(L"- [" + tag + L"]") == std::wstring::npos) {
+			std::wstring newText = origText + L" - [" + tag + L"]";
+			return o_SetWindowTextW(hWnd, newText.c_str());
+		}
+	}
+	return o_SetWindowTextW(hWnd, lpString);
+}
+
+HRESULT WINAPI h_SetCurrentProcessExplicitAppUserModelID(PCWSTR AppID) {
+	if (g_enabled && g_isolateAppId && AppID) {
+		std::wstring tag = GetTagSuffix();
+		std::wstring newAppID = AppID;
+		newAppID += L"." + tag;
+		DebugLog("SetCurrentProcessExplicitAppUserModelID Hook: orig='%ws', new='%ws'", AppID, newAppID.c_str());
+		return o_SetCurrentProcessExplicitAppUserModelID ? o_SetCurrentProcessExplicitAppUserModelID(newAppID.c_str()) : S_OK;
+	}
+	return o_SetCurrentProcessExplicitAppUserModelID ? o_SetCurrentProcessExplicitAppUserModelID(AppID) : S_OK;
+}
+
+class ProxyPropertyStore : public IPropertyStore {
+private:
+	IPropertyStore* m_realStore;
+	LONG m_refCount;
+public:
+	ProxyPropertyStore(IPropertyStore* store) : m_realStore(store), m_refCount(1) {}
+	virtual ~ProxyPropertyStore() { if (m_realStore) m_realStore->Release(); }
+
+	HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppvObject) override {
+		if (riid == IID_IUnknown || riid == IID_IPropertyStore) {
+			*ppvObject = static_cast<IPropertyStore*>(this);
+			AddRef();
+			return S_OK;
+		}
+		return m_realStore->QueryInterface(riid, ppvObject);
+	}
+	ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&m_refCount); }
+	ULONG STDMETHODCALLTYPE Release() override {
+		ULONG count = InterlockedDecrement(&m_refCount);
+		if (count == 0) { delete this; return 0; }
+		return count;
+	}
+	HRESULT STDMETHODCALLTYPE GetCount(DWORD* cProps) override { return m_realStore->GetCount(cProps); }
+	HRESULT STDMETHODCALLTYPE GetAt(DWORD iProp, PROPERTYKEY* pkey) override { return m_realStore->GetAt(iProp, pkey); }
+	HRESULT STDMETHODCALLTYPE GetValue(REFPROPERTYKEY key, PROPVARIANT* pv) override { return m_realStore->GetValue(key, pv); }
+	HRESULT STDMETHODCALLTYPE SetValue(REFPROPERTYKEY key, REFPROPVARIANT propvar) override {
+		if (g_enabled && g_isolateAppId && IsEqualPropertyKey(key, PKEY_AppUserModel_ID)) {
+			if (propvar.vt == VT_LPWSTR && propvar.pwszVal) {
+				std::wstring tag = GetTagSuffix();
+				std::wstring newAppID = propvar.pwszVal;
+				newAppID += L"." + tag;
+				PROPVARIANT newPropvar;
+				PropVariantInit(&newPropvar);
+				newPropvar.vt = VT_LPWSTR;
+				newPropvar.pwszVal = const_cast<wchar_t*>(newAppID.c_str());
+				DebugLog("SHGetPropertyStoreForWindow SetValue PKEY_AppUserModel_ID Hook: orig='%ws', new='%ws'", propvar.pwszVal, newAppID.c_str());
+				HRESULT hr = m_realStore->SetValue(key, newPropvar);
+				return hr;
+			}
+		}
+		return m_realStore->SetValue(key, propvar);
+	}
+	HRESULT STDMETHODCALLTYPE Commit() override { return m_realStore->Commit(); }
+};
+
+HRESULT WINAPI h_SHGetPropertyStoreForWindow(HWND hwnd, REFIID riid, void** ppv) {
+	HRESULT hr = o_SHGetPropertyStoreForWindow ? o_SHGetPropertyStoreForWindow(hwnd, riid, ppv) : E_FAIL;
+	if (SUCCEEDED(hr) && ppv && *ppv && g_enabled && g_isolateAppId) {
+		if (riid == IID_IPropertyStore) {
+			IPropertyStore* realStore = static_cast<IPropertyStore*>(*ppv);
+			*ppv = new ProxyPropertyStore(realStore);
+		}
+	}
+	return hr;
+}
+
 // =====================================================================
 // Hook installation via MinHook
 // =====================================================================
@@ -348,6 +534,9 @@ struct HookDef {
 
 void InstallAllHooks() {
 	DebugLog("InstallAllHooks start (MinHook)");
+
+	LoadLibraryW(L"shell32.dll");
+	LoadLibraryW(L"user32.dll");
 
 	MH_STATUS mi = MH_Initialize();
 	if (mi != MH_OK) {
@@ -371,6 +560,12 @@ void InstallAllHooks() {
 		{ L"kernelbase.dll", "FindFirstFileW",       (void*)h_FindFirstFileW,        (void**)&o_FindFirstFileW },
 		{ L"kernelbase.dll", "FindFirstFileExW",     (void*)h_FindFirstFileExW,      (void**)&o_FindFirstFileExW },
 		{ L"kernelbase.dll", "CreateFile2",          (void*)h_CreateFile2,           (void**)&o_CreateFile2 },
+		{ L"kernelbase.dll", "CreateNamedPipeW",     (void*)h_CreateNamedPipeW,      (void**)&o_CreateNamedPipeW },
+		{ L"shell32.dll",    "Shell_NotifyIconW",    (void*)h_Shell_NotifyIconW,     (void**)&o_Shell_NotifyIconW },
+		{ L"shell32.dll",    "Shell_NotifyIconA",    (void*)h_Shell_NotifyIconA,     (void**)&o_Shell_NotifyIconA },
+		{ L"shell32.dll",    "SetCurrentProcessExplicitAppUserModelID", (void*)h_SetCurrentProcessExplicitAppUserModelID, (void**)&o_SetCurrentProcessExplicitAppUserModelID },
+		{ L"shell32.dll",    "SHGetPropertyStoreForWindow", (void*)h_SHGetPropertyStoreForWindow, (void**)&o_SHGetPropertyStoreForWindow },
+		{ L"user32.dll",     "SetWindowTextW",       (void*)h_SetWindowTextW,        (void**)&o_SetWindowTextW },
 	};
 
 	const int count = sizeof(defs) / sizeof(defs[0]);
@@ -424,11 +619,10 @@ std::wstring Trim(std::wstring s) {
 	return s.substr(a, b - a + 1);
 }
 
-bool ParseTdataNameArg(const wchar_t* cmdLine, std::wstring& outTarget) {
+bool ParseNamedArg(const wchar_t* cmdLine, const wchar_t* key, std::wstring& outVal) {
 	if (!cmdLine || !*cmdLine) return false;
 
-	const wchar_t* key = L"-tdata_name";
-	const size_t keyLen = 11;
+	const size_t keyLen = wcslen(key);
 	const wchar_t* pos = wcsstr(cmdLine, key);
 	while (pos != nullptr) {
 		bool leftOk = (pos == cmdLine) || (pos[-1] == L' ' || pos[-1] == L'\t');
@@ -452,7 +646,7 @@ bool ParseTdataNameArg(const wchar_t* cmdLine, std::wstring& outTarget) {
 			}
 			val = Trim(val);
 			if (!val.empty()) {
-				outTarget = val;
+				outVal = val;
 				return true;
 			}
 		}
@@ -462,28 +656,48 @@ bool ParseTdataNameArg(const wchar_t* cmdLine, std::wstring& outTarget) {
 }
 
 void LoadConfig() {
-	// 优先度 1: 从命令行参数 -tdata_name 获取（权重最高）
-	LPCWSTR cmdLine = GetCommandLineW();
-	std::wstring cmdTarget;
-	if (ParseTdataNameArg(cmdLine, cmdTarget)) {
-		g_target = cmdTarget;
-		g_enabled = true;
-		DebugLog("LoadConfig: from cmdline -tdata_name='%ws' enabled=%d", g_target.c_str(), g_enabled);
-		return;
-	}
-
-	// 优先度 2: 环境变量 TDATA_NAME（降级回退）
 	wchar_t val[256] = { 0 };
 	DWORD n = GetEnvironmentVariableW(L"TDATA_NAME", val, 256);
 	if (n > 0 && n < 256) {
 		g_target = Trim(val);
-		if (!g_target.empty()) {
+		if (!g_target.empty()) g_enabled = true;
+	} else {
+		LPCWSTR cmdLine = GetCommandLineW();
+		std::wstring cmdTarget;
+		if (ParseNamedArg(cmdLine, L"-tdata_name", cmdTarget)) {
+			g_target = cmdTarget;
 			g_enabled = true;
-			DebugLog("LoadConfig: from TDATA_NAME='%ws' enabled=%d", g_target.c_str(), g_enabled);
-			return;
 		}
 	}
-	DebugLog("LoadConfig: no valid -tdata_name arg or TDATA_NAME env set, redirect disabled");
+
+	wchar_t trayVal[256] = { 0 };
+	DWORD nTray = GetEnvironmentVariableW(L"TRAY_NAME", trayVal, 256);
+	if (nTray > 0 && nTray < 256) {
+		g_trayName = Trim(trayVal);
+	} else {
+		LPCWSTR cmdLine = GetCommandLineW();
+		std::wstring cmdTray;
+		if (ParseNamedArg(cmdLine, L"-tray_name", cmdTray)) {
+			g_trayName = cmdTray;
+		}
+	}
+
+	wchar_t isolateVal[256] = { 0 };
+	DWORD nIsolate = GetEnvironmentVariableW(L"ISOLATE_APPID", isolateVal, 256);
+	if (nIsolate > 0 && nIsolate < 256) {
+		std::wstring valStr = Trim(isolateVal);
+		g_isolateAppId = (valStr == L"1" || valStr == L"true" || valStr == L"TRUE");
+	} else {
+		LPCWSTR cmdLine = GetCommandLineW();
+		std::wstring cmdIsolate;
+		if (ParseNamedArg(cmdLine, L"-isolate_appid", cmdIsolate)) {
+			g_isolateAppId = (cmdIsolate == L"1" || cmdIsolate == L"true" || cmdIsolate == L"TRUE");
+		} else if (wcsstr(cmdLine, L"-isolate_appid") != nullptr) {
+			g_isolateAppId = true;
+		}
+	}
+
+	DebugLog("LoadConfig: TDATA_NAME='%ws' TRAY_NAME='%ws' isolate_appid=%d enabled=%d", g_target.c_str(), g_trayName.c_str(), g_isolateAppId, g_enabled);
 }
 
 } // namespace

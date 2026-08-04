@@ -15,14 +15,14 @@ class EditLabelDialog(QDialog):
     """账户编辑/新增对话框."""
 
     def __init__(
-        self,
-        user_id: str = "",
-        folder: str = "",
-        tag: str = "",
-        info: str = "",
-        identity: str = "",
-        key: str = "",
-        parent: Optional[QWidget] = None,
+            self,
+            user_id: str = "",
+            folder: str = "",
+            tag: str = "",
+            info: str = "",
+            identity: str = "",
+            key: str = "",
+            parent: Optional[QWidget] = None,
     ) -> None:
         """初始化账户标签编辑对话框."""
         super().__init__(parent)
@@ -195,7 +195,7 @@ class ShowKeyDialog(QDialog):
 
     def get_keys(self) -> Tuple[str, str, str]:
         """获取各密钥文本框的编辑值."""
-        return (self.ui.info_edit.text().strip(), self.ui.identity_edit.text().strip(), self.ui.key_edit.text().strip())
+        return self.ui.info_edit.text().strip(), self.ui.identity_edit.text().strip(), self.ui.key_edit.text().strip()
 
 
 class SettingsDialogHelper:
@@ -203,22 +203,20 @@ class SettingsDialogHelper:
 
     @staticmethod
     def handle_edit_dialog_result(
-        item: Optional[QListWidgetItem],
-        dialog: EditLabelDialog,
-        current_configs: Dict[str, Any],
-        path_edit_text: str,
-        update_config_callback: Callable[..., None],
-        model_update_callback: Callable[..., None],
-        model_add_callback: Callable[..., None],
-        config_manage: Optional[Any] = None,  # noqa: ANN401
-        refresh_display_callback: Optional[Callable[[], None]] = None,
+            item: Optional[QListWidgetItem],
+            dialog: EditLabelDialog,
+            current_configs: Dict[str, Any],
+            path_edit_text: str,
+            update_config_callback: Callable[..., None],
+            model_update_callback: Callable[..., None],
+            model_add_callback: Callable[..., None],
+            config_manage: Optional[Any] = None,  # noqa: ANN401
+            refresh_display_callback: Optional[Callable[[], None]] = None,
     ) -> None:
         """解析并同步账户编辑结果."""
         id_val, folder, info, identity, key, tag = dialog.get_account_data()
 
         if dialog.is_default:
-            if config_manage:
-                config_manage.default = tag
             update_config_callback("default", tag)
 
         if folder and tag:
@@ -243,7 +241,63 @@ class SettingsDialogHelper:
         if old_tag and not dialog.is_default and old_tag == current_configs.get("default"):
             update_config_callback("default", tag)
 
-        update_config_callback("tags", config_manage.get_all_accounts() if config_manage else {})
-
         if dialog.is_default and refresh_display_callback:
             refresh_display_callback(tag)
+
+
+class AdvancedSettingsDialog(QDialog):
+    """高级设置对话框."""
+
+    def __init__(
+            self,
+            launch_mode: str = "symlink",
+            hook_fallback: bool = True,
+            log_output: bool = True,
+            single_instance: bool = False,
+            isolate_appid: bool = False,
+            parent: Optional[QWidget] = None,
+    ) -> None:
+        """初始化高级设置对话框."""
+        super().__init__(parent)
+        from src.core.constants import LaunchMode
+        from src.ui.ui_advanced import Ui_advanced
+
+        self.ui = Ui_advanced()
+        self.ui.setupUi(self)
+
+        self.ui.launch_mode_combo.clear()
+        self.ui.launch_mode_combo.addItem("链接", LaunchMode.SYMLINK.value)
+        self.ui.launch_mode_combo.addItem("hook", LaunchMode.HOOK.value)
+
+        for i in range(self.ui.launch_mode_combo.count()):
+            if self.ui.launch_mode_combo.itemData(i) == launch_mode:
+                self.ui.launch_mode_combo.setCurrentIndex(i)
+                break
+
+        self.ui.fallback.setChecked(hook_fallback)
+        self.ui.fallback.setEnabled(launch_mode == LaunchMode.HOOK.value)
+        self.ui.single_instance.setChecked(single_instance)
+        self.ui.isolate_appid.setChecked(isolate_appid)
+        self.ui.log_output.setChecked(log_output)
+
+        self._connect_signals()
+
+    def _connect_signals(self) -> None:
+        """绑定控件事件槽函数."""
+        self.ui.launch_mode_combo.currentIndexChanged.connect(self._on_mode_changed)
+        self.ui.confirm_button.clicked.connect(self.accept)
+        self.ui.cancel_button.clicked.connect(self.reject)
+
+    def _on_mode_changed(self, index: int) -> None:
+        """启动模式切换回调."""
+        mode = self.ui.launch_mode_combo.itemData(index)
+        self.ui.fallback.setEnabled(mode == "hook")
+
+    def get_settings(self) -> Tuple[str, bool, bool, bool, bool]:
+        """获取设置数据."""
+        launch_mode = self.ui.launch_mode_combo.currentData()
+        fallback = self.ui.fallback.isChecked()
+        log_output = self.ui.log_output.isChecked()
+        single_instance = self.ui.single_instance.isChecked()
+        isolate_appid = self.ui.isolate_appid.isChecked()
+        return launch_mode, fallback, log_output, single_instance, isolate_appid

@@ -44,3 +44,4 @@ logs/
 .codegraph/
 src/hook/*.dll
 src/hook/*.obj
+src/hook/minhook/*.obj

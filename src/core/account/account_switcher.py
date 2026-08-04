@@ -2,6 +2,7 @@
 
 from contextlib import contextmanager
 from datetime import datetime
+from pathlib import Path
 from typing import Callable, Generator, Optional, Tuple
 
 from src.core.account.account_monitor import AccountMonitor
@@ -48,8 +49,57 @@ class AccountSwitcher:
 
         if tag and not target_folder:
             target_folder = find_account_folder(self._config.path, tag)
+            if not target_folder:
+                p = Path(tag)
+                if not p.is_absolute():
+                    p_base = Path(self._config.path) / tag
+                    if p_base.is_dir():
+                        target_folder = p.name
+                elif p.is_dir():
+                    target_folder = p.name
+                else:
+                    target_folder = tag
         if default_tag and not default_folder:
             default_folder = find_account_folder(self._config.path, default_tag)
+
+        is_hook = self._config.launch_mode == LaunchMode.HOOK
+
+        if is_hook:
+            active_tag = tag or default_tag
+            active_folder = target_folder if (tag and tag != default_tag) else (default_folder or "tdata")
+
+            if self._process_manager.is_target_running(active_folder):
+                self.logger.info(f"账户 '{active_tag}' 已在运行，激活窗口")
+                self._process_manager.bring_to_foreground(active_folder)
+                return True
+
+            spawn_time = datetime.now()
+            success = self._process_manager.start_process(
+                wait=True,
+                tdata_name=active_folder,
+                tray_name=active_tag,
+            )
+            if success:
+                self.logger.info(f"账户 '{active_tag}' (Hook 模式) 启动成功")
+                self.monitor = AccountMonitor(
+                    active_tag,
+                    active_tag,
+                    self._config,
+                    self.logger,
+                    spawn_time=spawn_time,
+                    target_folder=active_folder,
+                )
+            else:
+                self.logger.error(f"账户 '{active_tag}' (Hook 模式) 启动失败")
+                if self._config.hook_fallback:
+                    return self._fallback_to_symlink(
+                        is_default=(active_tag == default_tag),
+                        confirm_callback=confirm_callback,
+                        target_folder=target_folder,
+                        default_folder=default_folder,
+                    )
+            self._config.sync_all_account_paths()
+            return success
 
         check_tag = None
         needs_recovery = False
@@ -117,7 +167,6 @@ class AccountSwitcher:
         """hook 模式启动失败后降级为链接模式."""
         self.logger.warning("hook 模式启动失败，降级为链接模式")
 
-        # 清理可能残留的进程（hook 注入失败可能留下半启动的进程）
         try:
             self._process_manager.kill_process(self._config.client)
         except Exception as e:
@@ -133,7 +182,6 @@ class AccountSwitcher:
                 self.logger.error("降级失败：无法重指向软链接")
                 return False
 
-        # 用链接模式启动
         return self._process_manager.start_process(wait=True, force_symlink=True)
 
     def _process(

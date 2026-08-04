@@ -1,4 +1,4 @@
-"""hook 注入器"""
+"""Hook 注入器."""
 
 import argparse
 import ctypes
@@ -9,11 +9,8 @@ from ctypes import wintypes
 
 from src.core.logger import Logger
 
-# ---------------------------------------------------------------------
-# Windows API 声明
-# ---------------------------------------------------------------------
-
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
 
 class STARTUPINFOW(ctypes.Structure):
     _fields_ = [
@@ -37,6 +34,7 @@ class STARTUPINFOW(ctypes.Structure):
         ("hStdError", wintypes.HANDLE),
     ]
 
+
 class PROCESS_INFORMATION(ctypes.Structure):
     _fields_ = [
         ("hProcess", wintypes.HANDLE),
@@ -45,7 +43,7 @@ class PROCESS_INFORMATION(ctypes.Structure):
         ("dwThreadId", wintypes.DWORD),
     ]
 
-# 常量
+
 CREATE_SUSPENDED = 0x00000004
 CREATE_UNICODE_ENVIRONMENT = 0x00000400
 CREATE_NEW_CONSOLE = 0x00000010
@@ -55,7 +53,6 @@ MEM_RELEASE = 0x00008000
 PAGE_READWRITE = 0x00000004
 WAIT_TIMEOUT = 0x00000102
 
-# 函数原型
 kernel32.CreateProcessW.argtypes = [
     wintypes.LPCWSTR, wintypes.LPWSTR, ctypes.c_void_p, ctypes.c_void_p,
     wintypes.BOOL, wintypes.DWORD, ctypes.c_void_p, wintypes.LPCWSTR,
@@ -106,16 +103,8 @@ kernel32.CloseHandle.restype = wintypes.BOOL
 kernel32.GetLastError.restype = wintypes.DWORD
 
 
-# ---------------------------------------------------------------------
-# 工具函数
-# ---------------------------------------------------------------------
-
-def get_loadlibrary_address():
-    """
-    获取 LoadLibraryW 在目标进程中的地址。
-    kernel32.dll 作为 KnownDLL 在系统启动时加载，基地址在所有 64 位进程中一致，
-    因此可直接用本进程地址。
-    """
+def get_loadlibrary_address() -> int:
+    """获取 LoadLibraryW 在目标进程中的地址."""
     h_kernel32 = kernel32.GetModuleHandleW("kernel32.dll")
     if not h_kernel32:
         raise OSError(f"GetModuleHandleW(kernel32) failed: {kernel32.GetLastError()}")
@@ -125,11 +114,8 @@ def get_loadlibrary_address():
     return addr
 
 
-def write_environment_block(env_dict):
-    """
-    将环境变量字典编码为 CREATE_UNICODE_ENVIRONMENT 格式的环境块。
-    格式: key=value\\0key=value\\0...\\0\\0 (UTF-16LE)
-    """
+def write_environment_block(env_dict: dict) -> bytes:
+    """将环境变量字典编码为环境块数据."""
     parts = []
     for k, v in env_dict.items():
         parts.append(f"{k}={v}")
@@ -137,12 +123,8 @@ def write_environment_block(env_dict):
     return block.encode("utf-16-le")
 
 
-# ---------------------------------------------------------------------
-# 注入核心
-# ---------------------------------------------------------------------
-
-def inject_dll(h_process, dll_path, logger: Logger):
-    """向目标进程注入 DLL，返回是否成功。"""
+def inject_dll(h_process: int, dll_path: str, logger: Logger) -> bool:
+    """向目标进程注入 DLL."""
     dll_path_abs = os.path.abspath(dll_path)
     if not os.path.isfile(dll_path_abs):
         raise FileNotFoundError(f"DLL not found: {dll_path_abs}")
@@ -196,31 +178,18 @@ def inject_dll(h_process, dll_path, logger: Logger):
     return True
 
 
-# ---------------------------------------------------------------------
-# 主流程
-# ---------------------------------------------------------------------
-
 def launch_with_hook(
     telegram_path: str,
     dll_path: str,
     logger: Logger,
     tdata_name: str | None = None,
+    tray_name: str | None = None,
+    isolate_appid: bool = False,
     workdir: str | None = None,
     extra_args: str = "",
     no_suspend: bool = False,
 ) -> int | None:
-    """
-    以挂起方式启动 Telegram 并注入 hook.dll，返回进程 PID（失败返回 None）。
-
-    参数:
-        telegram_path   Telegram.exe 路径 (必需)
-        dll_path        hook.dll 路径 (必需)
-        logger          日志记录器 (必需)
-        tdata_name      自定义 tdata 目录名，如 tdata-1
-        workdir         传给 Telegram 的工作目录 (-workdir 参数)
-        extra_args      额外传给 Telegram 的命令行参数
-        no_suspend      不挂起直接注入 (不推荐，hook 时机不保证)
-    """
+    """启动 Telegram 并注入 DLL."""
     telegram_path = os.path.abspath(telegram_path)
     if not os.path.isfile(telegram_path):
         logger.error(f"找不到 Telegram: {telegram_path}")
@@ -235,12 +204,18 @@ def launch_with_hook(
     logger.debug(f"DLL      : {dll_path}")
     if tdata_name:
         logger.debug(f"tdata名  : {tdata_name}")
+    if tray_name:
+        logger.debug(f"tray名   : {tray_name}")
 
     env = dict(os.environ)
     if tdata_name:
         env["TDATA_NAME"] = tdata_name
+    if tray_name:
+        env["TRAY_NAME"] = tray_name
+    if isolate_appid:
+        env["ISOLATE_APPID"] = "1"
 
-    cmd_line = f'"{telegram_path}"'
+    cmd_line = f'"{telegram_path}" -many'
     if workdir:
         workdir_abs = os.path.abspath(workdir)
         cmd_line += f' -workdir "{workdir_abs}"'
@@ -314,18 +289,19 @@ def launch_with_hook(
     return pi.dwProcessId
 
 
-def main():
+def main() -> int:
+    """CLI 注入器入口."""
     parser = argparse.ArgumentParser(
-        description="hook DLL 注入器 - 挂起启动 Telegram 并注入 DLL",
+        description="hook DLL 注入器",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
     parser.add_argument("telegram", help="Telegram.exe 路径")
-    parser.add_argument("--dll", default=None, help="hook.dll 路径 (默认与脚本同目录)")
-    parser.add_argument("--tdata", default=None, help="自定义 tdata 目录名，如 tdata-1")
-    parser.add_argument("--workdir", default=None, help="传给 Telegram 的工作目录 (-workdir)")
-    parser.add_argument("--args", default="", help="额外传给 Telegram 的命令行参数")
-    parser.add_argument("--no-suspend", action="store_true", help="不挂起直接注入 (不推荐)")
+    parser.add_argument("--dll", default=None, help="hook.dll 路径")
+    parser.add_argument("--tdata", default=None, help="自定义 tdata 目录名")
+    parser.add_argument("--workdir", default=None, help="工作目录")
+    parser.add_argument("--args", default="", help="额外命令行参数")
+    parser.add_argument("--no-suspend", action="store_true", help="不挂起直接注入")
     opts = parser.parse_args()
 
     script_dir = os.path.dirname(os.path.abspath(__file__))

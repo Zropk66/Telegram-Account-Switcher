@@ -4,7 +4,7 @@ from enum import Enum
 
 # --- 应用元数据 ---
 APP_TITLE = "TAS"
-APP_VERSION = "2.0.1"
+APP_VERSION = "2.1.0"
 SINGLE_INSTANCE_LOCK_NAME = "TelegramAccountSwitcher"
 MUTEX_PREFIX = "Global\\"
 
@@ -36,6 +36,10 @@ TELEGRAM_REG_KEY = r"tg\shell\open\command"
 MAX_RETRIES = 30
 MONITOR_MTIME_CHECK_INTERVAL = 2.0
 MONITOR_SESSION_MIN_DURATION = 60.0
+
+# --- IPC 通信常数 ---
+IPC_PIPE_ADDRESS = r"\\.\pipe\TAS_IPC_PIPE"
+IPC_AUTH_KEY = b"TAS_IPC_SECRET"
 
 # --- 密码学常数与不变量 ---
 GCM_MARKER = b"\x47\x43\x4d"

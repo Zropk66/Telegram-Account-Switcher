@@ -4,7 +4,7 @@ English | [简体中文](README.md)
 
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
 ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)
-![Version](https://img.shields.io/badge/Latest-v2.0.0-brightgreen)
+![Version](https://img.shields.io/badge/Latest-v2.1.0-brightgreen)
 ![License](https://img.shields.io/github/license/Zropk66/Telegram-Account-Switcher)
 
 A tool for quickly switching and managing multiple Telegram accounts on Windows with high performance. Supports both Symlink and DLL Hook launch modes for flexibility and security.
@@ -13,8 +13,11 @@ A tool for quickly switching and managing multiple Telegram accounts on Windows 
 
 - **Dual Launch Mode Support**:
   - **Symlink Mode**: Zero-copy account switching by redirecting the `tdata` symbolic link.
-  - **Hook Mode (DLL Injection)**: Directly passes data directories to Telegram via DLL injection.
+  - **Hook Mode (DLL Injection)**: Directly specifies data directories via environment variable injection, no symlink redirection needed; supports running multiple accounts in parallel.
 - **Fallback Protection (Hook Fallback)**: Automatically falls back to Symlink mode if Hook injection fails.
+- **Multi-Account Launch**: Launch multiple accounts at once via `-s tag1,tag2`, each running independently (Hook mode).
+- **Single Instance & IPC**: Supports single-instance lock to prevent duplicate launches; secondary instances forward switch commands to the primary process via named pipe (IPC).
+- **Smart Window Activation**: In Hook mode, detects if the target account is already running and brings the existing window to the foreground instead of relaunching.
 - **Data Encryption**: Encrypts sensitive Telegram `key_datas` files using AES-256-GCM.
 - **Credential Backup & Key Login**: Extracts and backs up credentials (`key`/`identity`/`info`) for passwordless login recovery.
 - **Process & Event Monitoring**: Monitors Telegram process lifecycles and `user_data/configs` login status in real-time.
@@ -37,14 +40,17 @@ uv sync
 # (Optional) Recompile hook.dll: Run inside "x64 Native Tools Command Prompt for VS":
 # cd src/hook && compile.bat
 
-# Build executable (output to output/TAS.exe)
+# Build executable (output to output/)
 python build.py
+
+# Specify build mode and toolchain
+python build.py --mode release --toolchain msvc
 
 # Run launcher
 python launcher.py
 ```
 
-After building, the executable will be located at `output/TAS.exe`.
+After building, the executable will be located in the `output/` directory, with a filename containing the version, platform, and toolchain info.
 
 ## Command Line Arguments
 
@@ -52,7 +58,7 @@ After building, the executable will be located at `output/TAS.exe`.
 |------------------|----------|-------------------------------------|-----------------------------------|
 | --version        | -v       | Show version                        | `TAS.exe -v`                      |
 | --settings       | -c       | Open GUI settings window            | `TAS.exe -c`                      |
-| --switch [TAG]   | -s [TAG] | Switch to specified account         | `TAS.exe -s tag1`                 |
+| --switch [TAG]   | -s [TAG] | Switch to specified account(s)      | `TAS.exe -s tag1,tag2`            |
 | --tag [TAG]      | -t [TAG] | Specify tag for operation           | `TAS.exe -e -t tag1 -p password`  |
 | --key-login      | -k       | Force login using backed-up keys    | `TAS.exe -s tag1 -k`              |
 | --debug          |          | Enable DEBUG log output             | `TAS.exe --debug`                 |
@@ -60,6 +66,8 @@ After building, the executable will be located at `output/TAS.exe`.
 | --decrypt        | -d       | Decrypt account data                | `TAS.exe -d -p password`          |
 | --password [PWD] | -p [PWD] | Specify encryption/decryption pwd   | `TAS.exe -s tag1 -p password`     |
 | --help           | -h       | Show help                           | `TAS.exe -h`                      |
+
+> **Multi-Account Launch**: The `--switch` argument supports comma-separated tags (e.g., `-s work,personal`). In Hook mode, this launches multiple Telegram instances simultaneously. Multi-account launch is disabled when single-instance mode is enabled.
 
 ## Directory Structure & Tag Identification
 
@@ -108,18 +116,26 @@ Running the app automatically creates `config.json`:
     },
     "log_output": true,
     "launch_mode": "symlink",
-    "hook_fallback": true
+    "hook_fallback": true,
+    "single_instance": false,
+    "isolate_appid": false
 }
 ```
 
-* `launch_mode`: Launch mode, options are `symlink` or `hook`.
-* `hook_fallback`: Whether to automatically fall back to `symlink` mode when `hook` mode launch fails (default `true`).
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `launch_mode` | string | `"symlink"` | Launch mode, options are `symlink` or `hook` |
+| `hook_fallback` | bool | `true` | Whether to automatically fall back to `symlink` mode when `hook` mode launch fails |
+| `single_instance` | bool | `false` | Single-instance mode; prevents duplicate TAS launches, secondary instances forward switch commands via IPC |
+| `isolate_appid` | bool | `false` | AppID isolation toggle for multi-instance window grouping |
 
 ## Troubleshooting & Notes
 
 1. **Debug Logging**: Logs default to `INFO` level. Pass `--debug` to inspect detailed execution traces or check `TAS.log`.
 2. **Symlink Permissions**: Creating symbolic links in Windows requires developer mode or administrator permissions.
-3. **Hook Fallback**: If DLL injection is blocked by anti-virus software, enable `hook_fallback` for automatic fallback.
+3. **Hook Mode**: Hook mode is ideal for scenarios where you want to avoid frequent `tdata` symlink redirections; it supports running multiple accounts in parallel. If DLL injection is blocked by anti-virus software, enable `hook_fallback` for automatic fallback.
+4. **Single Instance & Multi-Launch**: When `single_instance` is enabled, launching TAS again will forward the switch command to the running primary process via IPC pipe. When disabled, each instance runs independently. Multi-account launch is disabled in single-instance mode.
+5. **Window Activation**: In Hook mode, if the target account is already running, TAS will automatically activate and focus the existing window instead of relaunching.
 
 ## License
 

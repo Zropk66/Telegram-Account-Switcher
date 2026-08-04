@@ -17,6 +17,7 @@ from src.core.constants import (
     TDATA_DIR,
     TELEGRAM_CONFIGS_SUBPATH,
     TELEGRAM_IDENTITY_KEY,
+    LaunchMode,
 )
 from src.core.logger import Logger
 
@@ -66,7 +67,8 @@ class _ConfigsFileHandler(FileSystemEventHandler):
                     self._login_flag[0] = True
                     self._wake_event.set()
             except (ValueError, OSError):
-                pass
+                import traceback
+                traceback.print_exc()
 
 
 class AccountMonitor:
@@ -90,6 +92,7 @@ class AccountMonitor:
         self.logger = logger
         self.spawn_time = spawn_time or datetime.now()
         self.target_folder = target_folder
+        self.start_time: Optional[datetime] = None
         folder_name = target_folder or TDATA_DIR
         self.configs_file = Path(config_manage.path) / folder_name / TELEGRAM_IDENTITY_KEY / TELEGRAM_CONFIGS_SUBPATH
 
@@ -157,9 +160,10 @@ class AccountMonitor:
                             self._login_detected[0] = self._check_mtime()
 
                         if self._login_detected[0]:
-                            self.logger.info("检测到登录成功")
+                            tag_label = self.tag or self.config.default or "默认"
+                            self.logger.info(f"[{tag_label}] 检测到登录成功")
                             is_logged_in = True
-                            self.config.start_time = datetime.now()
+                            self.start_time = datetime.now()
                             monitor_started = True
                             for cb in list(self._login_callbacks):
                                 try:
@@ -167,29 +171,36 @@ class AccountMonitor:
                                 except Exception as e:
                                     self.logger.exception("登录回调执行失败", e)
                 else:
+                    tag_label = self.tag or self.config.default or "默认"
                     if not is_logged_in:
-                        self.logger.warning("检测到 Telegram 在登录成功前意外关闭")
+                        self.logger.warning(f"[{tag_label}] 检测到 Telegram 在登录成功前意外关闭")
 
                     if self.tag and self.tag != self.config.default:
-                        if monitor_started:
-                            running_time = datetime.now() - self.config.start_time
+                        if monitor_started and self.start_time:
+                            running_time = datetime.now() - self.start_time
                             if running_time.total_seconds() >= MONITOR_SESSION_MIN_DURATION and is_logged_in:
                                 self.logger.info(f"正在备份账户密钥：{self.tag}")
                                 account_dir = Path(self.config.path) / (self.target_folder or TDATA_DIR)
                                 self.config.backup_account_keys(self.tag, account_dir)
 
-                        self.logger.debug("正在恢复默认账户状态...")
-                        restore_default()
+                        if self.config.launch_mode != LaunchMode.HOOK:
+                            self.logger.debug("正在恢复默认账户状态...")
+                            restore_default()
                     break
         except Exception as e:
             self.logger.exception("监控线程发生未捕获异常", e)
         finally:
-            self.logger.debug("正在清理资源...")
-            if self._observer:
-                self._observer.stop()
-                self._observer.join(timeout=2)
+            tag_label = self.tag or self.config.default or "默认"
+            self.logger.debug(f"[{tag_label}] 正在清理资源...")
+            obs = self._observer
+            self._observer = None
+            if obs:
+                try:
+                    obs.stop()
+                except Exception:
+                    import traceback
+                    traceback.print_exc()
             self.config.sync_all_account_paths()
-
             for cb in list(self._completion_callbacks):
                 try:
                     cb(True, "会话已正常结束")

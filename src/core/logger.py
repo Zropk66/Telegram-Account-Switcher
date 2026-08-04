@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 PopupHandler = Callable[[str, str, str], None]
 
-_popup_state: dict = {"handler": None}
+_popup_state: dict[str, Optional[PopupHandler]] = {"handler": None}
 _exception_level_registered = False
 
 
@@ -83,7 +83,8 @@ def _setup_popup_bridge() -> None:
         if exception := message.record.get("exception", None):
             full_message += f"\n\n{exception}"
 
-        handler(full_message, level_name, icon_type)
+        if callable(handler):
+            handler(full_message, level_name, icon_type)
 
     loguru_logger.add(popup_sink, filter=lambda r: r["extra"].get("popup", False))
 

@@ -1,6 +1,6 @@
 """账户列表模型单元测试。"""
 import os
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from PySide6.QtCore import Qt
@@ -28,24 +28,20 @@ def list_widget(qapp):
 
 
 @pytest.fixture
-def mock_config():
-    """提供 Mock 配置服务，隔离业务逻辑。"""
-    config = MagicMock()
-    config.default = "default_account"
-    config.tags = {}
-    config.get_all_accounts.return_value = {}
-    return config
+def current_configs():
+    """提供临时配置字典对象。"""
+    return {"default": "default_account", "tags": {}}
 
 
 @pytest.fixture
-def model(list_widget, mock_config):
+def model(list_widget, current_configs):
     """提供初始化完成的 AccountListModel 实例。"""
-    return AccountListModel(list_widget, mock_config)
+    return AccountListModel(list_widget, current_configs)
 
 
-def test_load_from_config_populates_list(model, list_widget, mock_config):
+def test_load_from_config_populates_list(model, list_widget, current_configs):
     """验证从配置文件加载账户列表后，UI 组件能正确填充项目。"""
-    mock_config.get_all_accounts.return_value = {
+    current_configs["tags"] = {
         "account1": {"id": "123", "folder": "tdata1", "info": "", "identity": "", "key": ""},
         "account2": {"id": "456", "folder": "tdata2", "info": "", "identity": "", "key": ""}
     }
@@ -65,7 +61,7 @@ def test_load_from_config_populates_list(model, list_widget, mock_config):
     assert data2["id"] == "456"
 
 
-def test_add_account_syncs_to_config(model, list_widget, mock_config):
+def test_add_account_syncs_to_config(model, list_widget, current_configs):
     """验证新增账户时，UI 列表更新且配置中心能够同步保存数据。"""
     account_data = {
         "tag": "new_account",
@@ -79,7 +75,7 @@ def test_add_account_syncs_to_config(model, list_widget, mock_config):
     model.add_account(account_data)
 
     assert list_widget.count() == 1
-    assert mock_config.tags == {"new_account": {
+    assert current_configs["tags"] == {"new_account": {
         "id": "789",
         "folder": "tdata_new",
         "info": "info_new",
@@ -88,9 +84,9 @@ def test_add_account_syncs_to_config(model, list_widget, mock_config):
     }}
 
 
-def test_remove_current_removes_from_config(model, list_widget, mock_config):
+def test_remove_current_removes_from_config(model, list_widget, current_configs):
     """验证移除选中账户时，UI 与配置层级能够同步完成删除。"""
-    mock_config.get_all_accounts.return_value = {
+    current_configs["tags"] = {
         "account1": {"id": "123", "folder": "tdata1", "info": "", "identity": "", "key": ""}
     }
     model.load_from_config()
@@ -100,13 +96,20 @@ def test_remove_current_removes_from_config(model, list_widget, mock_config):
 
     assert result is True
     assert list_widget.count() == 0
-    assert mock_config.tags == {}
+    assert current_configs["tags"] == {}
 
 
-def test_refresh_display_marks_default(model, list_widget, mock_config):
+def test_remove_current_without_selection_returns_false(model, list_widget, current_configs):
+    """验证未选择项目时移除账户返回 False。"""
+    with patch('src.ui.settings_model.alert'):
+        result = model.remove_current()
+    assert result is False
+
+
+def test_refresh_display_marks_default(model, list_widget, current_configs):
     """验证刷新显示时，默认账户项能获得正确的 UI 标记。"""
-    mock_config.default = "account1"
-    mock_config.get_all_accounts.return_value = {
+    current_configs["default"] = "account1"
+    current_configs["tags"] = {
         "account1": {"id": "123", "folder": "tdata1", "info": "", "identity": "", "key": ""},
         "account2": {"id": "456", "folder": "tdata2", "info": "", "identity": "", "key": ""}
     }
@@ -120,7 +123,7 @@ def test_refresh_display_marks_default(model, list_widget, mock_config):
     assert "[默认]" not in item2.text()
 
 
-def test_sync_to_config_preserves_data_fields(model, list_widget, mock_config):
+def test_sync_to_config_preserves_data_fields(model, list_widget, current_configs):
     """验证配置同步过程中，账户的所有业务字段都能完整保留。"""
     data = {
         "tag": "test_account",
@@ -136,8 +139,8 @@ def test_sync_to_config_preserves_data_fields(model, list_widget, mock_config):
 
     model.sync_to_config()
 
-    assert "test_account" in mock_config.tags
-    saved_data = mock_config.tags["test_account"]
+    assert "test_account" in current_configs["tags"]
+    saved_data = current_configs["tags"]["test_account"]
     assert saved_data["id"] == "test_id"
     assert saved_data["folder"] == "test_folder"
     assert saved_data["info"] == "test_info"

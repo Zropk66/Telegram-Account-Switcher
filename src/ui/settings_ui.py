@@ -21,7 +21,7 @@ from src.core import Logger, TASConfigException
 from src.core.config import ConfigService
 from src.core.constants import LaunchMode
 from src.core.env_service import TelegramEnvService
-from src.ui.dialogs import EditLabelDialog, SettingsDialogHelper
+from src.ui.dialogs import AdvancedSettingsDialog, EditLabelDialog, SettingsDialogHelper
 from src.ui.popup import alert, confirm
 from src.ui.settings_model import AccountListModel
 from src.ui.ui_settings import Ui_setting
@@ -50,7 +50,7 @@ class SettingsController(QObject):
         super().__init__()
         self.window = window
         self.config = ConfigService()
-        self.model = AccountListModel(window.ui.tags_widget, self.config)
+        self.model = AccountListModel(window.ui.tags_widget, window.current_configs)
         self.thread_pool = QThreadPool.globalInstance()
 
     def search_client_in_background(self) -> None:
@@ -124,9 +124,9 @@ class SettingsWindow(QMainWindow):
         super().__init__()
         self.ui = Ui_setting()
         self.ui.setupUi(self)
-        self.controller = SettingsController(self)
         self.config = ConfigService()
         self.current_configs = self.config.configs
+        self.controller = SettingsController(self)
 
         self.ui.version_label.setText(f"TAS v{version}")
 
@@ -142,10 +142,6 @@ class SettingsWindow(QMainWindow):
 
         self.controller.model.load_from_config()
         self.ui.tags_widget.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.ui.log_output.setChecked(self.current_configs.get("log_output", True))
-        self.ui.fallback.setChecked(self.current_configs.get("hook_fallback", True))
-
-        self._init_launch_mode_combo()
 
         self._connect_signals()
 
@@ -162,33 +158,39 @@ class SettingsWindow(QMainWindow):
         )
         self.ui.tags_widget.itemDoubleClicked.connect(self.edit_item_event)
         self.ui.search_account_button.clicked.connect(self.scan_account_event)
+        self.ui.add_account_button.clicked.connect(self.add_account_event)
+        self.ui.delete_account_button.clicked.connect(self.delete_account_event)
         self.ui.tags_widget.customContextMenuRequested.connect(self.show_context_menu)
-        self.ui.log_output.stateChanged.connect(
-            lambda s: self.update_current_config("log_output", bool(s))
-        )
-        self.ui.fallback.stateChanged.connect(
-            lambda s: self.update_current_config("hook_fallback", bool(s))
-        )
-        self.ui.launch_mode_combo.currentIndexChanged.connect(
-            self._on_launch_mode_changed
-        )
+        self.ui.advanced_button.clicked.connect(self.open_advanced_settings_event)
         self.ui.finish_button.clicked.connect(self.save_config_event)
         with suppress(AttributeError):
             self.ui.cancel_button.clicked.connect(self.close)
 
-    def _init_launch_mode_combo(self) -> None:
-        """初始化启动模式下拉框选项并选中当前配置值."""
-        self.ui.launch_mode_combo.clear()
-        self.ui.launch_mode_combo.addItem("链接", LaunchMode.SYMLINK.value)
-        self.ui.launch_mode_combo.addItem("hook", LaunchMode.HOOK.value)
+    @Slot()
+    def delete_account_event(self) -> None:
+        """删除当前选中账户标签."""
+        self.controller.model.remove_current()
 
-        current_mode = self.current_configs.get("launch_mode", LaunchMode.SYMLINK.value)
-        for i in range(self.ui.launch_mode_combo.count()):
-            if self.ui.launch_mode_combo.itemData(i) == current_mode:
-                self.ui.launch_mode_combo.setCurrentIndex(i)
-                break
+    @Slot()
+    def open_advanced_settings_event(self) -> None:
+        """打开高级设置对话框."""
+        mode = self.current_configs.get("launch_mode", LaunchMode.SYMLINK.value)
+        fallback = self.current_configs.get("hook_fallback", True)
+        log_out = self.current_configs.get("log_output", True)
+        single_inst = self.current_configs.get("single_instance", False)
+        isolate_app = self.current_configs.get("isolate_appid", False)
 
-        self.ui.fallback.setEnabled(current_mode == LaunchMode.HOOK.value)
+        dialog = AdvancedSettingsDialog(mode, fallback, log_out, single_inst, isolate_app, self)
+        if dialog.exec() == QDialog.Accepted:
+            res = dialog.get_settings()
+            new_mode, new_fallback, new_log_out = res[0], res[1], res[2]
+            new_single_inst = res[3] if len(res) > 3 else False
+            new_isolate_app = res[4] if len(res) > 4 else False
+            self.update_current_config("launch_mode", new_mode)
+            self.update_current_config("hook_fallback", new_fallback)
+            self.update_current_config("log_output", new_log_out)
+            self.update_current_config("single_instance", new_single_inst)
+            self.update_current_config("isolate_appid", new_isolate_app)
 
     @override
     def closeEvent(self, event: QCloseEvent) -> None:
@@ -208,24 +210,13 @@ class SettingsWindow(QMainWindow):
 
         action = menu.exec(self.ui.tags_widget.mapToGlobal(pos))
         if action == add_action:
-            self.add_item_event()
+            self.add_account_event()
         elif delete_action and action == delete_action:
-            self.controller.model.remove_current(
-                lambda: self.update_current_config(
-                    "tags", self.config.get_all_accounts()
-                )
-            )
+            self.delete_account_event()
 
     def update_current_config(self, key: str, value: Any) -> None:  # noqa: ANN401
         """更新临时配置."""
         self.current_configs[key] = value
-
-    @Slot(int)
-    def _on_launch_mode_changed(self, index: int) -> None:
-        """启动模式切换事件槽函数."""
-        mode = self.ui.launch_mode_combo.itemData(index)
-        self.update_current_config("launch_mode", mode)
-        self.ui.fallback.setEnabled(mode == LaunchMode.HOOK.value)
 
     @Slot()
     def save_config_event(self) -> None:
@@ -238,7 +229,7 @@ class SettingsWindow(QMainWindow):
             Logger().exception("配置保存失败", e)
 
     @Slot()
-    def add_item_event(self) -> None:
+    def add_account_event(self) -> None:
         """新增账户事件槽函数."""
         dialog = EditLabelDialog("", "", "", "", "", "", self)
         if dialog.exec() == QDialog.Accepted:
@@ -264,7 +255,6 @@ class SettingsWindow(QMainWindow):
     def scan_account_event(self) -> None:
         """扫描账户事件槽函数."""
         self.controller.scan_accounts(self.ui.path_edit.text())
-        self.current_configs["tags"] = self.config.get_all_accounts()
 
     def _handle_edit_dialog_result(
         self, item: Optional[QListWidgetItem], dialog: EditLabelDialog

@@ -3,6 +3,7 @@
 from .account import AccountSwitcher, recovery
 from .crypto import AESCipher
 from .exceptions import (
+    TASCLIException,
     TASConfigException,
     TASException,
 )
@@ -23,6 +24,7 @@ __all__ = [
     "ProcessMonitor",
     "TASException",
     "TASConfigException",
+    "TASCLIException",
     "SingleInstanceException",
     "AccountSwitcher",
     "Logger",

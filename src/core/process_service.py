@@ -75,10 +75,8 @@ class PsutilProcessService:
     def wait_for_process(pid: int, timeout: float) -> bool:
         """等待指定进程结束."""
         try:
-            psutil.Process(pid).wait(timeout=timeout)
-            return True
-        except psutil.TimeoutExpired:
-            return False
+            proc = psutil.Process(pid)
+            return bool(not proc.is_running() or proc.status() == psutil.STATUS_ZOMBIE)
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             return True
 

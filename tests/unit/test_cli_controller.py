@@ -4,6 +4,19 @@ from unittest.mock import patch, MagicMock
 from src.core.cli_controller import CLIAction
 
 
+def test_single_instance_forbids_multiple_tags(mock_config, mock_logger):
+    """验证单例模式开启时，尝试同时启动多个账户会抛出异常。"""
+    import pytest
+    from src.core.cli_controller import CLIController
+    from src.core.exceptions import TASCLIException
+
+    mock_config.single_instance = True
+    cli = CLIController(config=mock_config, logger=mock_logger)
+
+    with pytest.raises(TASCLIException, match="单例模式开启时禁止同时启动多个账户"):
+        cli._validate_tag("account1,account2")
+
+
 def test_parse_switch_with_tag(mock_config, mock_logger):
     """验证 `-s tag` 参数会被解析为目标切换标签。"""
     from src.core.cli_controller import CLIController

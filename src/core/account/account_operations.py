@@ -9,7 +9,7 @@ from src.core.account.account_services import (
     repoint_tdata_link,
 )
 from src.core.config import ConfigService
-from src.core.constants import KEY_FOLDER, MAX_RETRIES, TDATA_DIR
+from src.core.constants import KEY_FOLDER, MAX_RETRIES, TDATA_DIR, LaunchMode
 from src.core.crypto import AESCipher
 from src.core.exceptions import TASCipherException, TASException
 from src.core.logger import Logger
@@ -79,7 +79,6 @@ def _account_switch(
                     acc = configs.get_account(target_tag)
                     cfg_folder = acc.get("folder") if acc else None
                     if cfg_folder:
-                        tag_folder = cfg_folder
                         target_path = Path(configs.path) / cfg_folder
                         target_path.mkdir(parents=True, exist_ok=True)
                         repoint_tdata_link(configs.path, cfg_folder)
@@ -184,8 +183,10 @@ def switch_to_target(cipher: AESCipher, target_folder: str | None = None) -> boo
 
 def recovery(config: ConfigService | None = None, logger: Logger | None = None) -> None:
     """紧急恢复默认账户."""
-    pm = ProcessManager()
     cfg = config or configs
+    if cfg.launch_mode == LaunchMode.HOOK:
+        return
+    pm = ProcessManager()
     log = logger or globals().get("logger")
     try:
         pm.kill_process(cfg.client)

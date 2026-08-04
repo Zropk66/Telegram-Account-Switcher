@@ -57,7 +57,7 @@ def build_args(build_mode: str, toolchain: str) -> list[str]:
         "--include-data-files=src/hook/hook.dll=src/hook/hook.dll",
         f"--output-filename={output_filename}",
         "--output-dir=output",
-        "--show-progress",
+        # "--show-progress",
         "--jobs=8",
         "--windows-company-name=Company",
         "--windows-product-name=TAS",

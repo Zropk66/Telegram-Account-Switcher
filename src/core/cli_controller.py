@@ -9,7 +9,7 @@ from typing import Callable, Optional, Tuple
 from src.core import AESCipher
 from src.core.config import ConfigService
 from src.core.constants import APP_TITLE, APP_VERSION, KEY_FOLDER
-from src.core.exceptions import TASConfigException
+from src.core.exceptions import TASCLIException, TASConfigException
 from src.core.logger import Logger
 from src.core.utils import search_file_in_dirs
 
@@ -84,6 +84,9 @@ class CLIController:
                 raise TASConfigException(f"默认账户 '{self.config.default}' 文件夹未找到")
 
             return True
+        except TASCLIException as e:
+            self.logger.error(f"参数错误: {e}", popup=True)
+            raise
         except Exception as e:
             self.logger.error(f"配置验证失败: {e}", popup=True)
             return False
@@ -103,21 +106,47 @@ class CLIController:
 
     def _validate_tag(self, tag: str) -> str:
         """验证标签有效性."""
-        if tag == self.config.default:
-            return tag
+        raw_tags = [t.strip() for t in tag.split(",") if t.strip()]
+        if self.config.single_instance and len(raw_tags) > 1:
+            raise TASCLIException("单例模式开启时禁止同时启动多个账户")
 
-        if tag not in self.config.tags:
-            self.logger.warning(f"标签无效: {tag}")
+        valid_tags = []
+        for t in raw_tags:
+            if t == self.config.default or t in self.config.tags:
+                valid_tags.append(t)
+                continue
+
+            folder = self.config.get_account(t).get("folder")
+            if folder and (Path(self.config.path) / folder).is_dir() or search_file_in_dirs(self.config.path, t):
+                valid_tags.append(t)
+                continue
+
+            # 检查是否为路径
+            p = Path(t)
+            if not p.is_absolute():
+                p_base = Path(self.config.path) / t
+                if p_base.is_dir():
+                    p = p_base
+
+            if p.is_dir():
+                tag_file = p / "tas_tag"
+                if tag_file.is_file():
+                    try:
+                        read_tag = tag_file.read_text(encoding="utf-8").strip()
+                        if read_tag:
+                            valid_tags.append(read_tag)
+                            continue
+                    except Exception:
+                        import traceback
+                        traceback.print_exc()
+                valid_tags.append(p.name)
+                continue
+
+            self.logger.warning(f"标签或路径无效: {t}")
+
+        if not valid_tags:
             return self.config.default
-
-        folder = self.config.get_account(tag).get("folder")
-        if folder and (Path(self.config.path) / folder).is_dir():
-            return tag
-
-        if not search_file_in_dirs(self.config.path, tag):
-            self.logger.warning(f"标签无效或文件缺失: {tag}")
-            return self.config.default
-        return tag
+        return ",".join(valid_tags)
 
     def handle_actions(self, args: argparse.Namespace) -> CLIAction:
         """根据解析结果返回执行意图."""
@@ -147,8 +176,7 @@ class CLIController:
     def _process_tags(self, operation: str) -> None:
         """批量处理所有标签的加密或解密操作."""
         if not self.config.pwd:
-            self._handle_error("未指定密钥.")
-            sys.exit()
+            raise TASCLIException("未指定密钥，请通过 -p/--password 参数指定密码")
 
         cipher = self._cipher_factory(self.config.pwd)
         op_name = "加密" if operation == "encrypt" else "解密"
@@ -184,15 +212,13 @@ class CLIController:
     def _process_single_tag(self, tag: str, operation: str) -> None:
         """处理单个标签的加密或解密操作."""
         if not self.config.pwd:
-            self._handle_error("未指定密钥.")
-            sys.exit()
+            raise TASCLIException("未指定密钥，请通过 -p/--password 参数指定密码")
 
         if tag not in self.config.tags and tag != self.config.default:
-            self._handle_error(f"标签 '{tag}' 未注册.")
-            sys.exit()
+            raise TASCLIException(f"标签 '{tag}' 未注册")
 
         if tag == self.config.default:
-            self._handle_warning(f"标签 '{tag}' 为默认账户，禁止操作.")
+            raise TASCLIException(f"标签 '{tag}' 为默认账户，禁止操作")
             return
 
         cipher = self._cipher_factory(self.config.pwd)

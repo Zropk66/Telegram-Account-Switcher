@@ -13,6 +13,12 @@ class TASConfigException(TASException):
     pass
 
 
+class TASCLIException(TASException):
+    """命令行参数异常."""
+
+    pass
+
+
 class TASCipherException(TASException):
     """加解密异常."""
 

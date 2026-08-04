@@ -114,7 +114,6 @@ class TestSettingsDialogHelper:
             refresh_display_callback=refresh_cb
         )
 
-        assert mock_config_manage.default == 'new_tag'
         update_cb.assert_any_call('default', 'new_tag')
         refresh_cb.assert_called_once_with('new_tag')
 

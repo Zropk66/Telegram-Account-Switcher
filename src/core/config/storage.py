@@ -67,7 +67,6 @@ class ConfigStorage:
                 with os.fdopen(fd, "w", encoding="utf-8") as f:
                     json.dump(to_save, f, indent=4, ensure_ascii=False)
                     f.flush()
-                    os.fsync(f.fileno())
 
                 os.replace(temp_file, self._config_path)
                 temp_file = None

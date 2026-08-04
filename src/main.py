@@ -12,6 +12,7 @@ from src.core import (
     AccountSwitcher,
     Logger,
     ProcessMonitor,
+    TASCLIException,
     recovery,
 )
 from src.core.cli_controller import CLIAction, CLIController
@@ -28,6 +29,7 @@ from src.ui.popup import Popup
 
 logger: Logger
 CONFIG: ConfigService
+active_app: Optional["TASApp"] = None
 
 TITLE = APP_TITLE
 VERSION = APP_VERSION
@@ -70,6 +72,8 @@ class TASApp:
         """初始化应用程序."""
         from PySide6.QtWidgets import QApplication
 
+        global active_app
+        active_app = self
         self.version = version
         self.monitor = None
         self.app = QApplication.instance() or QApplication(sys.argv)
@@ -107,13 +111,19 @@ class TASApp:
             return 1
 
         config_file = Path(CONFIG.config_file)
-        if not config_file.exists() or not self.cli_controller.check_config(args):
-            from src.ui.settings_ui import open_settings_window
+        try:
+            if not config_file.exists() or not self.cli_controller.check_config(args):
+                from src.ui.settings_ui import open_settings_window
 
-            open_settings_window(self.version)
-            return 0
+                open_settings_window(self.version)
+                return 0
+        except TASCLIException:
+            return 1
 
-        action = self.cli_controller.handle_actions(args)
+        try:
+            action = self.cli_controller.handle_actions(args)
+        except TASCLIException:
+            return 1
 
         if action == CLIAction.SHOW_HELP:
             from src.ui.help_ui import open_help_window
@@ -128,7 +138,9 @@ class TASApp:
             return 0
         else:
             CONFIG.config_check = True
-        logger.info(f"切换账户: {CONFIG.tag or CONFIG.default}")
+        tags_str = CONFIG.tag or CONFIG.default
+        tags_list = [t.strip() for t in tags_str.split(",") if t.strip()]
+        logger.info(f"切换账户: {tags_str}")
         logger.debug(f"Telegram路径: {CONFIG.path}")
 
         def wrapped_confirm(msg: str) -> bool:
@@ -136,18 +148,38 @@ class TASApp:
             with Popup.context():
                 return Popup.confirm(msg, "账户切换确认")
 
-        switcher = AccountSwitcher()
-        switched = switcher.process(confirm_callback=wrapped_confirm)
-        if not switched:
-            logger.error("账户切换失败")
+        monitors = []
+        all_switched = True
+        for current_tag in tags_list:
+            CONFIG.tag = current_tag
+            switcher = AccountSwitcher()
+            switched = switcher.process(confirm_callback=wrapped_confirm)
+            if not switched:
+                logger.error(f"账户 '{current_tag}' 切换启动失败")
+                all_switched = False
+            elif switcher.monitor:
+                monitors.append(switcher.monitor)
+
+        if not all_switched and not monitors:
             return 1
 
-        account_monitor = switcher.monitor
-        if account_monitor:
-            logger.debug("账户切换成功，开始后台监控")
+        if monitors:
+            import time
+            logger.debug(f"启动 {len(monitors)} 个后台进程监控")
             self.monitor = ProcessMonitor(CONFIG.client, logger=logger)
-            with self.monitor.watch(account_monitor.handle_process_status):
-                account_monitor.run()
+            for account_monitor in monitors:
+                self.monitor.register_callback(account_monitor.handle_process_status)
+                t = threading.Thread(target=account_monitor.run, daemon=True, name=f"Monitor-{account_monitor.tag}")
+                t.start()
+            self.monitor.start_watching()
+            try:
+                while not all(m.completion_event.is_set() for m in monitors):
+                    time.sleep(0.5)
+            except (KeyboardInterrupt, SystemExit):
+                import traceback
+                traceback.print_exc()
+            finally:
+                self.monitor.stop_watching()
 
         return 0
 
@@ -216,25 +248,65 @@ def handle_global_exception(
 def main() -> int:
     """程序主入口."""
     sys.excepthook = handle_global_exception
+    global logger, CONFIG
+
+    setup_dependency_injection()
+    logger = create_logger_with_popup()
+    CONFIG = ConfigService()
+
+    from src.core.ipc import IPCClient, IPCServer
+
+    cli_controller = CLIController(version=VERSION)
     try:
-        with SingleInstanceLock.ensure_single_instance():
-            global logger, CONFIG
+        parsed_args = cli_controller.parse_args()
+        switch_target = parsed_args.switch if parsed_args.switch else CONFIG.default
+    except Exception:
+        switch_target = CONFIG.default
 
-            setup_dependency_injection()
-            logger = create_logger_with_popup()
-            CONFIG = ConfigService()
+    if CONFIG.configs.get("single_instance", False):
+        try:
+            SingleInstanceLock.ensure_single_instance()
+        except SingleInstanceException as e:
+            if logger:
+                logger.error(str(e), popup=True)
+            return 1
 
-            logger.info("初始化成功")
+    if IPCClient.send_command(switch_target):
+        logger.info(f"已成功将切换目标 '{switch_target}' 发送至主 TAS 进程处理。")
+        return 0
 
-            try:
-                with TASApp(VERSION) as app:
-                    return app.run()
-            except KeyboardInterrupt:
-                return 0
-            except Exception as e:
-                logger.exception("程序异常终止", e)
-                return 1
-    except SingleInstanceException as e:
-        with Popup.context():
-            Popup.alert(str(e), "客户端重复启动")
+    def handle_remote_command(payload: str) -> None:
+        try:
+            logger.info(f"收到远程多开指令目标: {payload}")
+            validated_tags = cli_controller._validate_tag(payload)
+            tags_list = [t.strip() for t in validated_tags.split(",") if t.strip()]
+            for current_tag in tags_list:
+                CONFIG.tag = current_tag
+                switcher = AccountSwitcher()
+                if switcher.process() and switcher.monitor:
+                    if active_app and active_app.monitor:
+                        active_app.monitor.register_callback(switcher.monitor.handle_process_status)
+                    t = threading.Thread(
+                        target=switcher.monitor.run,
+                        daemon=True,
+                        name=f"Monitor-{switcher.monitor.tag}",
+                    )
+                    t.start()
+        except Exception as e:
+            logger.error(f"处理远程指令发生错误: {e}")
+
+    ipc_server = IPCServer(handle_remote_command, logger=logger)
+    ipc_server.start()
+
+    logger.info("初始化成功")
+
+    try:
+        with TASApp(VERSION) as app:
+            return app.run()
+    except KeyboardInterrupt:
+        return 0
+    except Exception as e:
+        logger.exception("程序异常终止", e)
         return 1
+    finally:
+        ipc_server.stop()

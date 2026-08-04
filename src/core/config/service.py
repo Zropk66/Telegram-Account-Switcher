@@ -2,6 +2,7 @@
 
 import os
 import threading
+import traceback
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
@@ -25,10 +26,12 @@ class ConfigService:
         "client": TELEGRAM_EXE,
         "path": "",
         "default": "",
+        "launch_mode": LaunchMode.SYMLINK.value,
         "log_output": True,
         "agreed_to_decrypt": False,
-        "launch_mode": LaunchMode.SYMLINK.value,
         "hook_fallback": True,
+        "single_instance": False,
+        "isolate_appid": False,
         "tags": {},
     }
 
@@ -108,7 +111,7 @@ class ConfigService:
             try:
                 self._log_handler(message)
             except (RuntimeError, TypeError):
-                pass
+                traceback.print_exc()
 
     def shutdown(self) -> None:
         """保存配置到磁盘."""
@@ -245,6 +248,26 @@ class ConfigService:
     def config_check(self, v: bool) -> None:
         """设置配置检查状态."""
         self._runtime.config_check = v
+
+    @property
+    def single_instance(self) -> bool:
+        """获取单实例限制开关."""
+        return self._get_field("single_instance", bool, False)
+
+    @single_instance.setter
+    def single_instance(self, value: bool) -> None:
+        """设置单实例限制开关."""
+        self._set_field("single_instance", bool, value)
+
+    @property
+    def isolate_appid(self) -> bool:
+        """获取 AppID 隔离开关."""
+        return self._get_field("isolate_appid", bool, False)
+
+    @isolate_appid.setter
+    def isolate_appid(self, value: bool) -> None:
+        """设置 AppID 隔离开关."""
+        self._set_field("isolate_appid", bool, value)
 
     @property
     def tag(self) -> str:
