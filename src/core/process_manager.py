@@ -1,10 +1,15 @@
 """进程管理."""
 
 import atexit
+import ctypes
+import hashlib
+import os
 import subprocess
+import sys
 import threading
 import weakref
 from contextlib import contextmanager, suppress
+from ctypes import wintypes
 from pathlib import Path
 from typing import Callable, Generator, Optional
 
@@ -18,6 +23,54 @@ from src.core.runtime import delay
 _should_reap: bool = True
 _active_managers = weakref.WeakSet()
 _hook_process_pool: dict[str, int] = {}
+
+_INVALID_HANDLE_VALUE = (1 << (64 if sys.maxsize > 2**32 else 32)) - 1
+
+_pm_kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+_pm_kernel32.CreateFileW.argtypes = [
+    wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+    ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+]
+_pm_kernel32.CreateFileW.restype = wintypes.HANDLE
+
+_pm_kernel32.WriteFile.argtypes = [
+    wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD,
+    ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p,
+]
+_pm_kernel32.WriteFile.restype = wintypes.BOOL
+
+_pm_kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+_pm_kernel32.CloseHandle.restype = wintypes.BOOL
+
+
+class _WIN32_FIND_DATAW(ctypes.Structure):
+    _fields_ = [
+        ("dwFileAttributes", wintypes.DWORD),
+        ("ftCreationTime", wintypes.FILETIME),
+        ("ftLastAccessTime", wintypes.FILETIME),
+        ("ftLastWriteTime", wintypes.FILETIME),
+        ("nFileSizeHigh", wintypes.DWORD),
+        ("nFileSizeLow", wintypes.DWORD),
+        ("dwReserved0", wintypes.DWORD),
+        ("dwReserved1", wintypes.DWORD),
+        ("cFileName", wintypes.WCHAR * 260),
+        ("cAlternateFileName", wintypes.WCHAR * 14),
+    ]
+
+
+_pm_kernel32.FindFirstFileW.argtypes = [
+    wintypes.LPCWSTR, ctypes.POINTER(_WIN32_FIND_DATAW),
+]
+_pm_kernel32.FindFirstFileW.restype = wintypes.HANDLE
+
+_pm_kernel32.FindNextFileW.argtypes = [
+    wintypes.HANDLE, ctypes.POINTER(_WIN32_FIND_DATAW),
+]
+_pm_kernel32.FindNextFileW.restype = wintypes.BOOL
+
+_pm_kernel32.FindClose.argtypes = [wintypes.HANDLE]
+_pm_kernel32.FindClose.restype = wintypes.BOOL
 
 
 def _set_should_reap(value: bool) -> None:
@@ -113,7 +166,10 @@ class ProcessManager:
             self._logger.error(f"找不到 hook DLL: {dll_path}")
             return False
 
-        self._logger.debug(f"使用 hook 模式启动: {full_path}")
+        self._logger.debug(
+            f"启动 hook 模式: exe={full_path}, dll={dll_path}, "
+            f"tdata={tdata_name}, tray={tray_name}"
+        )
 
         try:
             pid = launch_with_hook(
@@ -128,7 +184,6 @@ class ProcessManager:
                 self._logger.error("hook 注入失败")
                 return False
 
-            self._logger.debug(f"hook 注入成功，PID={pid}")
             if tdata_name:
                 _hook_process_pool[tdata_name] = pid
 
@@ -160,6 +215,238 @@ class ProcessManager:
                 continue
 
         return False
+
+    def _cleanup_exited_pids(self) -> None:
+        """清理 _hook_process_pool 中已退出的 PID."""
+        import psutil
+
+        to_remove = [
+            folder for folder, pid in _hook_process_pool.items()
+            if not psutil.pid_exists(pid)
+        ]
+        for folder in to_remove:
+            del _hook_process_pool[folder]
+
+    def get_running_instances(self) -> list[tuple[str, str, int]]:
+        """获取所有运行中的 hook 实例列表."""
+        self._cleanup_exited_pids()
+        result: list[tuple[str, str, int]] = []
+
+        for target_folder, pid in list(_hook_process_pool.items()):
+            if self._process_service.wait_for_process(pid, timeout=0.001):
+                continue
+
+            tag_name = target_folder
+            for tag, info in self._config.tags.items():
+                if info.get("folder") == target_folder:
+                    tag_name = tag
+                    break
+            else:
+                if target_folder == self._config.get_account(self._config.default).get("folder"):
+                    tag_name = self._config.default
+
+            result.append((tag_name, target_folder, pid))
+
+        return result
+
+    def forward_url(self, url: str, target_folder: str) -> bool:
+        """通过 hook 注入启动临时进程，将 tg:// URL 转发到已运行实例."""
+        from src.core.injecter import launch_with_hook
+
+        full_path = Path(self._config.path) / self._config.client
+        if not full_path.exists():
+            self._logger.error(f"找不到客户端可执行文件: {full_path}")
+            return False
+
+        src_dir = Path(__file__).resolve().parent.parent
+        dll_path = src_dir / "hook" / "hook.dll"
+        if not dll_path.exists():
+            self._logger.error(f"找不到 hook DLL: {dll_path}")
+            return False
+
+        self._logger.debug(f"转发 URL 到 '{target_folder}': {url}")
+
+        try:
+            pid = launch_with_hook(
+                telegram_path=str(full_path),
+                dll_path=str(dll_path),
+                logger=self._logger,
+                tdata_name=target_folder,
+                extra_args=url,
+            )
+            if pid is not None:
+                self._logger.info(f"URL 已转发至 PID={pid} (target={target_folder})")
+                return True
+            self._logger.error("URL 转发失败：hook 注入未成功")
+            return False
+        except Exception as e:
+            self._logger.error(f"URL 转发失败: {e}")
+            return False
+
+    def forward_url_symlink(self, url: str) -> bool:
+        """在链接模式下转发 tg:// URL（直接启动 Telegram 并传入 URL）."""
+        full_path = Path(self._config.path) / self._config.client
+        if not full_path.exists():
+            self._logger.error(f"找不到客户端可执行文件: {full_path}")
+            return False
+
+        self._logger.debug(f"转发 URL (链接模式): {url}")
+        try:
+            proc = subprocess.Popen(
+                args=[str(full_path), url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                shell=False,
+                start_new_session=True,
+            )
+            self._logger.info(f"URL 已转发 (链接模式) PID={proc.pid}")
+            return True
+        except Exception as e:
+            self._logger.error(f"URL 转发失败: {e}")
+            return False
+
+    def forward_url_direct(self, url: str, target_folder: str) -> bool:
+        """直接连接到已有实例的命名管道，转发 tg:// URL."""
+        self._cleanup_exited_pids()
+        path_hash = self._get_path_hash()
+
+        self._logger.debug(
+            f"forward_url_direct: hash={path_hash}, target='{target_folder}'"
+        )
+
+        pipe_name = self._find_instance_pipe(path_hash, target_folder)
+        if not pipe_name:
+            self._logger.debug(
+                f"未找到匹配管道 (hash={path_hash}, target={target_folder})"
+            )
+            return False
+
+        full_pipe_path = f"\\\\.\\pipe\\{pipe_name}"
+        self._logger.debug(f"连接管道: {full_pipe_path}")
+
+        handle = _pm_kernel32.CreateFileW(
+            full_pipe_path,
+            0xC0000000,
+            0,
+            None,
+            3,
+            0,
+            None,
+        )
+
+        if handle is None or handle == _INVALID_HANDLE_VALUE:
+            err = ctypes.get_last_error()
+            self._logger.debug(f"管道连接失败: error={err}")
+            return False
+
+        try:
+            command = f"OPEN:{url};"
+            cmd_bytes = command.encode("latin-1")
+            written = wintypes.DWORD(0)
+
+            success = _pm_kernel32.WriteFile(
+                handle, cmd_bytes, len(cmd_bytes), ctypes.byref(written), None
+            )
+
+            if not success:
+                err = ctypes.get_last_error()
+                self._logger.debug(f"管道写入失败: error={err}")
+                return False
+
+            self._logger.info(
+                f"URL 已通过管道直接转发: {url} (written={written.value} bytes)"
+            )
+
+            import time
+            time.sleep(0.3)
+            return True
+        finally:
+            _pm_kernel32.CloseHandle(handle)
+
+    def wait_for_instance(self, target_folder: str, timeout: float = 5.0) -> bool:
+        """等待指定实例的命名管道可用."""
+        import time
+
+        path_hash = self._get_path_hash()
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self._find_instance_pipe(path_hash, target_folder):
+                return True
+            time.sleep(0.2)
+        return False
+
+    def find_running_instances_by_pipes(self) -> list[tuple[str, str]]:
+        """通过管道枚举查找运行中的实例."""
+        path_hash = self._get_path_hash()
+
+        target_folders: set[str] = set()
+        default_folder = self._config.get_account(self._config.default).get("folder") or "tdata"
+        target_folders.add(default_folder)
+
+        for tag, info in self._config.tags.items():
+            folder = info.get("folder")
+            if folder:
+                target_folders.add(folder)
+
+        result: list[tuple[str, str]] = []
+        for folder in target_folders:
+            pipe_name = self._find_instance_pipe(path_hash, folder)
+            if pipe_name:
+                tag_name = folder
+                for tag, info in self._config.tags.items():
+                    if info.get("folder") == folder:
+                        tag_name = tag
+                        break
+                else:
+                    if folder == default_folder:
+                        tag_name = self._config.default
+                result.append((tag_name, folder))
+
+        self._logger.debug(f"管道枚举找到 {len(result)} 个运行实例: {result}")
+        return result
+
+    def _get_path_hash(self) -> str:
+        """计算工作目录的 MD5 哈希，用于命名管道匹配."""
+        workdir = os.path.abspath(self._config.path).replace("\\", "/")
+        if len(workdir) > 3 and workdir.endswith("/"):
+            workdir = workdir[:-1]
+        return hashlib.md5(workdir.encode("utf-8")).hexdigest()
+
+    def _find_instance_pipe(
+        self, path_hash: str, target_folder: str
+    ) -> Optional[str]:
+        """枚举命名管道，找到目标实例的管道名."""
+        find_data = _WIN32_FIND_DATAW()
+        search_handle = _pm_kernel32.FindFirstFileW(
+            r"\\.\pipe\*", ctypes.byref(find_data)
+        )
+
+        if search_handle is None or search_handle == _INVALID_HANDLE_VALUE:
+            self._logger.debug("FindFirstFileW 失败: 无管道")
+            return None
+
+        suffix = f"_{target_folder}"
+        hash_prefix = f"Global\\{path_hash}-"
+
+        try:
+            while True:
+                name = find_data.cFileName
+                if suffix in name and hash_prefix in name:
+                    self._logger.debug(f"匹配到管道: {name}")
+                    return name
+                if not _pm_kernel32.FindNextFileW(
+                    search_handle, ctypes.byref(find_data)
+                ):
+                    break
+        finally:
+            _pm_kernel32.FindClose(search_handle)
+
+        self._logger.debug(
+            f"管道枚举结束，未找到匹配 (prefix={hash_prefix}, suffix={suffix})"
+        )
+        return None
 
     def bring_to_foreground(self, target_folder: str) -> None:
         """置顶特定账号的窗口."""
@@ -232,7 +519,6 @@ class ProcessManager:
 
             self._logger.debug(f"找到目标窗口 HWND={target_hwnd}")
 
-            # 最小化状态先还原
             if user32.IsIconic(target_hwnd):
                 user32.ShowWindow(target_hwnd, 9)  # SW_RESTORE
 
@@ -245,13 +531,11 @@ class ProcessManager:
                 f"current_tid={current_tid} foreground_tid={foreground_tid} target_tid={target_tid}"
             )
 
-            # 先模拟 Alt 键释放前台锁，必须在 SetForegroundWindow 之前
             VK_MENU = 0x12  # noqa: N806
             KEYEVENTF_KEYUP = 0x0002  # noqa: N806
             user32.keybd_event(VK_MENU, 0, 0, 0)
             user32.keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0)
 
-            # 将调用线程的输入队列附加到前台线程和目标线程，绕过前台锁
             attached_fg = False
             attached_target = False
             if foreground_tid and foreground_tid != current_tid:
@@ -388,6 +672,7 @@ class ProcessMonitor:
         self.last_PID = None
         self._test_mode = test_mode
         self._callbacks: list[Callable[[bool, Optional[int]], None]] = []
+        self._pid_callbacks: dict[int, list[Callable[[bool, Optional[int]], None]]] = {}
 
     @contextmanager
     def watch(self, callback: Callable[[bool, Optional[int]], None]) -> Generator["ProcessMonitor", None, None]:
@@ -400,15 +685,28 @@ class ProcessMonitor:
             self.unregister_callback(callback)
             self.stop_watching()
 
-    def register_callback(self, callback: Callable[[bool, Optional[int]], None]) -> None:
-        """注册状态变化回调."""
-        if callback not in self._callbacks:
-            self._callbacks.append(callback)
+    def register_callback(
+        self,
+        callback: Callable[[bool, Optional[int]], None],
+        pid: Optional[int] = None,
+    ) -> None:
+        """注册状态变化回调。指定 pid 时仅在该进程状态变化时收到通知。"""
+        if pid is not None:
+            if pid not in self._pid_callbacks:
+                self._pid_callbacks[pid] = []
+            if callback not in self._pid_callbacks[pid]:
+                self._pid_callbacks[pid].append(callback)
+        else:
+            if callback not in self._callbacks:
+                self._callbacks.append(callback)
 
     def unregister_callback(self, callback: Callable[[bool, Optional[int]], None]) -> None:
         """注销状态变化回调."""
         if callback in self._callbacks:
             self._callbacks.remove(callback)
+        for pid, cbs in self._pid_callbacks.items():
+            if callback in cbs:
+                cbs.remove(callback)
 
     def start_watching(self) -> None:
         """启动进程监控."""
@@ -426,43 +724,51 @@ class ProcessMonitor:
             self._watch_thread.join(timeout=2.0)
 
     def _watch(self) -> None:
-        """运行监控循环."""
-        last_status = None
+        """运行监控循环：轮询所有同名进程，检测新增和退出。"""
+        known_pids: set[int] = set()
 
         while not self._stop_event.is_set():
             try:
-                current_status = self._wait_for_process_change(last_status)
+                current_pids = self._find_all_pids()
 
-                if current_status != last_status:
-                    for cb in list(self._callbacks):
-                        try:
-                            cb(current_status, self.last_PID)
-                        except Exception as e:
-                            self._logger.exception("ProcessMonitor 回调执行失败", e)
-                    last_status = current_status
+                for pid in known_pids - current_pids:
+                    self.last_PID = pid
+                    self._dispatch(False, pid)
+
+                for pid in current_pids - known_pids:
+                    self.last_PID = pid
+                    self._dispatch(True, pid)
+
+                known_pids = current_pids
+                self._stop_event.wait(self.check_interval)
 
             except Exception as e:
                 self._logger.exception("进程监控异常，短暂等待后重试", e)
                 self._stop_event.wait(5.0)
 
-    def _wait_for_process_change(self, last_status: bool) -> bool:
-        """检测进程状态改变."""
-        if last_status and self.last_PID:
-            is_dead = self._process_service.wait_for_process(self.last_PID, timeout=1.0)
-            if is_dead:
-                self.last_PID = None
-                return False
-            else:
-                self._stop_event.wait(self.check_interval)
-                return True
+    def _dispatch(self, is_alive: bool, pid: int) -> None:
+        """向通用回调和指定 PID 的回调分发状态变更。"""
+        for cb in list(self._callbacks):
+            try:
+                cb(is_alive, pid)
+            except Exception as e:
+                self._logger.exception("ProcessMonitor 回调执行失败", e)
+        for cb in list(self._pid_callbacks.get(pid, [])):
+            try:
+                cb(is_alive, pid)
+            except Exception as e:
+                self._logger.exception("ProcessMonitor 回调执行失败", e)
 
-        processes = self._process_service.find_processes(self.process_name)
-        if processes:
-            self.last_PID = processes[0].pid
-            return True
+    def _find_all_pids(self) -> set[int]:
+        """查找所有同名进程的 PID。"""
+        pids: set[int] = set()
+        for proc in self._process_service.find_processes(self.process_name):
+            pids.add(proc.pid)
+        return pids
 
-        self._stop_event.wait(self.check_interval)
-        return False
+    def notify_exit(self, pid: int) -> None:
+        """直接通知指定 PID 已退出，绕过轮询延迟。"""
+        self._dispatch(False, pid)
 
 
 def _atexit_cleanup() -> None:

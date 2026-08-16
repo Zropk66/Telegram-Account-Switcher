@@ -73,6 +73,12 @@ class Popup(QObject):
         return cls._app
 
     @classmethod
+    def process_events(cls) -> None:
+        """处理待处理的 UI 事件."""
+        app = cls._ensure_app()
+        app.processEvents()
+
+    @classmethod
     def _get_active_window(cls) -> Optional[QWidget]:
         """获取活跃的窗口."""
         app = QApplication.instance()

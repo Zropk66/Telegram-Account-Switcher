@@ -4,7 +4,7 @@ English | [简体中文](README.md)
 
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
 ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)
-![Version](https://img.shields.io/badge/Latest-v2.1.0-brightgreen)
+![Version](https://img.shields.io/badge/Latest-v2.2.0-brightgreen)
 ![License](https://img.shields.io/github/license/Zropk66/Telegram-Account-Switcher)
 
 A tool for quickly switching and managing multiple Telegram accounts on Windows with high performance. Supports both Symlink and DLL Hook launch modes for flexibility and security.
@@ -136,6 +136,7 @@ Running the app automatically creates `config.json`:
 3. **Hook Mode**: Hook mode is ideal for scenarios where you want to avoid frequent `tdata` symlink redirections; it supports running multiple accounts in parallel. If DLL injection is blocked by anti-virus software, enable `hook_fallback` for automatic fallback.
 4. **Single Instance & Multi-Launch**: When `single_instance` is enabled, launching TAS again will forward the switch command to the running primary process via IPC pipe. When disabled, each instance runs independently. Multi-account launch is disabled in single-instance mode.
 5. **Window Activation**: In Hook mode, if the target account is already running, TAS will automatically activate and focus the existing window instead of relaunching.
+6. **Process Binding**: In Hook mode, TAS binds all Telegram instances via Job Object. If TAS is forcibly terminated, all child processes are automatically killed by the Windows kernel, preventing orphaned processes.
 
 ## License
 

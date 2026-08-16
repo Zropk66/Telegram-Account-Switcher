@@ -5,8 +5,11 @@
 #include <propkey.h>
 #include <string>
 #include <mutex>
+#include <atomic>
+#include <memory>
 #include <stdio.h>
 #include <stdarg.h>
+#include <share.h>
 
 #include "minhook/MinHook.h"
 
@@ -16,6 +19,19 @@ std::wstring g_target = L"tdata";
 std::wstring g_trayName = L"";
 bool g_enabled = false;
 bool g_isolateAppId = false;
+
+// TAS IPC communication
+static HANDLE g_ipc_pipe = INVALID_HANDLE_VALUE;
+static std::mutex g_ipcMutex;
+static std::atomic<bool> g_is_listener{false};
+static std::atomic<bool> g_has_failed_pipe{false};
+static std::atomic<bool> g_trying_original{false};
+static std::wstring g_failed_pipe_name;
+static DWORD g_failed_pipe_b = 0, g_failed_pipe_c = 0, g_failed_pipe_d = 0;
+static DWORD g_failed_pipe_e = 0, g_failed_pipe_f = 0, g_failed_pipe_g = 0;
+
+static HANDLE g_listener_mutex = NULL;
+static const wchar_t* kListenerMutexName = L"Global\\TAS_HOOK_LISTENER_MUTEX";
 
 // =====================================================================
 // Diagnostic logging
@@ -33,7 +49,7 @@ void DebugLog(const char* fmt, ...) {
 
 	std::lock_guard<std::mutex> lock(g_logMutex);
 	if (!g_logFile) {
-		fopen_s(&g_logFile, "hook.log", "a");
+		g_logFile = _fsopen("hook.log", "a", _SH_DENYNO);
 		if (!g_logFile) return;
 	}
 	fputs(timebuf, g_logFile);
@@ -317,6 +333,297 @@ static HRESULT SafeCreateFile2(pfnCreateFile2 fn, LPCWSTR a, DWORD b, DWORD c,
 }
 
 // =====================================================================
+// TAS IPC communication
+// =====================================================================
+static bool AcquireListenerMutex(DWORD timeout = 0) {
+    if (g_listener_mutex == NULL) {
+        g_listener_mutex = CreateMutexW(NULL, FALSE, kListenerMutexName);
+    }
+    if (g_listener_mutex == NULL) {
+        DebugLog("AcquireListenerMutex: CreateMutex failed, err=%d", GetLastError());
+        return false;
+    }
+    DWORD result = WaitForSingleObject(g_listener_mutex, timeout);
+    if (result == WAIT_OBJECT_0 || result == WAIT_ABANDONED) {
+        DebugLog("AcquireListenerMutex: acquired (result=%d, timeout=%d)", result, timeout);
+        return true;
+    }
+    DebugLog("AcquireListenerMutex: not acquired (result=%d, timeout=%d)", result, timeout);
+    return false;
+}
+
+static void ReleaseListenerMutex() {
+    if (g_listener_mutex) {
+        ReleaseMutex(g_listener_mutex);
+    }
+}
+
+void SendIPC(const wchar_t* fmt, ...) {
+    wchar_t buf[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    vswprintf(buf, 1024, fmt, ap);
+    va_end(ap);
+
+    std::lock_guard<std::mutex> lock(g_ipcMutex);
+    if (g_ipc_pipe == INVALID_HANDLE_VALUE) return;
+
+    DWORD written;
+    DWORD len = (DWORD)(wcslen(buf) + 1) * sizeof(wchar_t);
+    BOOL ok = WriteFile(g_ipc_pipe, buf, len, &written, NULL);
+    if (!ok) {
+        DebugLog("SendIPC: WriteFile failed, err=%d, msg='%ws'", GetLastError(), buf);
+    }
+}
+
+DWORD WINAPI PipeListenerThread(LPVOID param) {
+    HANDLE pipe = (HANDLE)param;
+    DebugLog("PipeListener: started, pipe=%p", pipe);
+
+    while (g_ipc_pipe != INVALID_HANDLE_VALUE) {
+        BOOL connected = ConnectNamedPipe(pipe, NULL)
+            ? TRUE : (GetLastError() == ERROR_PIPE_CONNECTED);
+
+        if (!connected) {
+            DebugLog("PipeListener: ConnectNamedPipe failed, err=%d", GetLastError());
+            break;
+        }
+
+        DebugLog("PipeListener: client connected");
+
+        BYTE buf[8192];
+        DWORD bytesRead = 0;
+        if (ReadFile(pipe, buf, sizeof(buf) - 1, &bytesRead, NULL) && bytesRead > 0) {
+            buf[bytesRead] = 0;
+
+            const char* data = (const char*)buf;
+            const char* tg = nullptr;
+
+            for (DWORD i = 0; i + 5 <= bytesRead; i++) {
+                if (memcmp(data + i, "tg://", 5) == 0) {
+                    tg = data + i;
+                    break;
+                }
+            }
+
+            if (!tg) {
+                for (DWORD i = 0; i + 10 <= bytesRead; i += 2) {
+                    if (memcmp(data + i, "t\0g\0:\0/\0/\0", 10) == 0) {
+                        char url[1024] = {0};
+                        int j = 0;
+                        for (DWORD k = i; k + 1 < bytesRead && j < 1023; k += 2) {
+                            char c = data[k];
+                            if (c == 0) break;
+                            url[j++] = c;
+                        }
+                        SendIPC(L"URL_FOUND:%hs", url);
+                        DebugLog("PipeListener: found URL (UTF16): %hs", url);
+                        tg = nullptr;
+                        break;
+                    }
+                }
+            }
+
+            if (tg) {
+                char url[1024] = {0};
+                int j = 0;
+                for (DWORD k = (DWORD)(tg - data); k < bytesRead && j < 1023; k++) {
+                    char c = data[k];
+                    if (c == ' ' || c == '"' || c == '\0' || c == '\r' || c == '\n') break;
+                    url[j++] = c;
+                }
+                SendIPC(L"URL_FOUND:%hs", url);
+                DebugLog("PipeListener: found URL (ASCII): %hs", url);
+            }
+        }
+
+        FlushFileBuffers(pipe);
+        DisconnectNamedPipe(pipe);
+        DebugLog("PipeListener: client disconnected");
+    }
+
+    CloseHandle(pipe);
+    DebugLog("PipeListener: exited");
+    return 0;
+}
+
+struct OriginalPipeParams {
+    std::wstring pipeName;
+    DWORD b, c, d, e, f, g_time;
+};
+
+DWORD WINAPI TryCreateOriginalPipeThread(LPVOID param) {
+    std::unique_ptr<OriginalPipeParams> p((OriginalPipeParams*)param);
+    LPCWSTR pipeName = p->pipeName.c_str();
+
+    DebugLog("TryCreateOriginalPipe: attempting original pipe: %ls (nMaxInstances forced to 1, orig=%d)", pipeName, p->d);
+
+    if (!AcquireListenerMutex()) {
+        g_failed_pipe_name = p->pipeName;
+        g_failed_pipe_b = p->b; g_failed_pipe_c = p->c; g_failed_pipe_d = p->d;
+        g_failed_pipe_e = p->e; g_failed_pipe_f = p->f; g_failed_pipe_g = p->g_time;
+        g_has_failed_pipe.store(true);
+        g_trying_original.store(false);
+        SendIPC(L"NOT_LISTENING");
+        DebugLog("TryCreateOriginalPipe: not listener (mutex held by another instance)");
+        return 0;
+    }
+
+    HANDLE rawPipe = RawCreateNamedPipeW(o_CreateNamedPipeW, pipeName, p->b, p->c, 1, p->e, p->f, p->g_time, NULL);
+
+    DWORD createErr = rawPipe == INVALID_HANDLE_VALUE ? GetLastError() : 0;
+    DebugLog("TryCreateOriginalPipe: result=%p, err=%d", rawPipe, createErr);
+
+    if (rawPipe != INVALID_HANDLE_VALUE) {
+        if (g_is_listener.load()) {
+            CloseHandle(rawPipe);
+            ReleaseListenerMutex();
+            g_trying_original.store(false);
+            DebugLog("TryCreateOriginalPipe: already listener, closing duplicate");
+            return 0;
+        }
+        g_is_listener.store(true);
+        g_trying_original.store(false);
+        LPCWSTR shortName = pipeName + 9;
+        DebugLog("TryCreateOriginalPipe: about to send LISTENING");
+        SendIPC(L"LISTENING:%ls", shortName);
+        DebugLog("TryCreateOriginalPipe: became listener, pipe=%ls", shortName);
+        CreateThread(NULL, 0, PipeListenerThread, rawPipe, 0, NULL);
+    } else {
+        ReleaseListenerMutex();
+        g_failed_pipe_name = p->pipeName;
+        g_failed_pipe_b = p->b; g_failed_pipe_c = p->c; g_failed_pipe_d = p->d;
+        g_failed_pipe_e = p->e; g_failed_pipe_f = p->f; g_failed_pipe_g = p->g_time;
+        g_has_failed_pipe.store(true);
+        g_trying_original.store(false);
+        SendIPC(L"NOT_LISTENING");
+        DebugLog("TryCreateOriginalPipe: not listener (pipe creation failed)");
+    }
+    return 0;
+}
+
+void TryCreateOriginalPipe(LPCWSTR pipeName, DWORD b, DWORD c, DWORD d, DWORD e, DWORD f, DWORD g_time, LPSECURITY_ATTRIBUTES h) {
+    if (g_ipc_pipe == INVALID_HANDLE_VALUE) {
+        DebugLog("TryCreateOriginalPipe: skip (no IPC pipe)");
+        return;
+    }
+    if (g_is_listener.load()) return;
+    if (g_has_failed_pipe.load()) return;
+    if (g_trying_original.exchange(true)) return;
+    if (wcsncmp(pipeName, L"\\\\.\\pipe\\Global\\", 16) != 0) {
+        g_trying_original.store(false);
+        DebugLog("TryCreateOriginalPipe: skip (not Global pipe): %ls", pipeName);
+        return;
+    }
+
+    auto* params = new OriginalPipeParams{
+        std::wstring(pipeName), b, c, d, e, f, g_time
+    };
+    CreateThread(NULL, 0, TryCreateOriginalPipeThread, params, 0, NULL);
+}
+
+DWORD WINAPI IPCRecvThread(LPVOID) {
+    wchar_t buf[512];
+    DWORD bytesRead;
+
+    DebugLog("IPCRecv: thread started, pipe=%p", g_ipc_pipe);
+
+    while (g_ipc_pipe != INVALID_HANDLE_VALUE) {
+        DWORD bytesAvail = 0;
+        if (!PeekNamedPipe(g_ipc_pipe, NULL, 0, NULL, &bytesAvail, NULL)) {
+            DWORD err = GetLastError();
+            DebugLog("IPCRecv: PeekNamedPipe failed, err=%d", err);
+            break;
+        }
+
+        if (bytesAvail == 0) {
+            Sleep(50);
+            continue;
+        }
+
+        BOOL ok = ReadFile(g_ipc_pipe, buf, sizeof(buf) - 2, &bytesRead, NULL);
+        DWORD err = ok ? 0 : GetLastError();
+        DebugLog("IPCRecv: ReadFile ok=%d, bytesRead=%d, err=%d", ok, bytesRead, err);
+
+        if (!ok || bytesRead == 0) break;
+
+        buf[bytesRead / sizeof(wchar_t)] = 0;
+        DebugLog("IPCRecv: received '%ws'", buf);
+
+        if (wcscmp(buf, L"RETRY_LISTEN") == 0 && g_has_failed_pipe.load() && !g_is_listener.load()) {
+            if (!AcquireListenerMutex(3000)) {
+                DebugLog("RETRY_LISTEN: mutex still held by another instance");
+                SendIPC(L"NOT_LISTENING");
+            } else {
+                HANDLE rawPipe = o_CreateNamedPipeW(
+                    g_failed_pipe_name.c_str(),
+                    g_failed_pipe_b, g_failed_pipe_c, 1,
+                    g_failed_pipe_e, g_failed_pipe_f, g_failed_pipe_g,
+                    NULL
+                );
+
+                if (rawPipe != INVALID_HANDLE_VALUE) {
+                    g_is_listener.store(true);
+                    g_has_failed_pipe.store(false);
+                    LPCWSTR shortName = g_failed_pipe_name.c_str() + 9;
+                    SendIPC(L"LISTENING:%ls", shortName);
+                    DebugLog("RETRY_LISTEN: became listener, pipe=%ls", shortName);
+                    CreateThread(NULL, 0, PipeListenerThread, rawPipe, 0, NULL);
+                } else {
+                    ReleaseListenerMutex();
+                    DebugLog("RETRY_LISTEN: still failed, err=%d", GetLastError());
+                }
+            }
+        }
+    }
+
+    DebugLog("IPCRecv: TAS disconnected");
+    std::lock_guard<std::mutex> lock(g_ipcMutex);
+    g_ipc_pipe = INVALID_HANDLE_VALUE;
+    return 0;
+}
+
+DWORD WINAPI ConnectToTASThread(LPVOID) {
+    for (int i = 0; i < 60; i++) {
+        g_ipc_pipe = SafeCreateFileW(
+            o_CreateFileW,
+            L"\\\\.\\pipe\\TAS_HOOK_IPC",
+            GENERIC_READ | GENERIC_WRITE,
+            0, NULL, OPEN_EXISTING, 0, NULL
+        );
+        if (g_ipc_pipe != INVALID_HANDLE_VALUE) break;
+
+        DWORD err = GetLastError();
+        if (i == 0 || i == 10 || i == 30 || i == 59) {
+            DebugLog("ConnectToTAS: retry %d, err=%d", i, err);
+        }
+        Sleep(200);
+    }
+
+    if (g_ipc_pipe == INVALID_HANDLE_VALUE) {
+        DebugLog("ConnectToTAS: failed to connect after 60 retries");
+        return 1;
+    }
+
+    DebugLog("ConnectToTAS: connected, pipe=%p", g_ipc_pipe);
+
+    DWORD mode = PIPE_READMODE_MESSAGE;
+    if (SetNamedPipeHandleState(g_ipc_pipe, &mode, NULL, NULL)) {
+        DebugLog("ConnectToTAS: set pipe to message mode OK");
+    } else {
+        DebugLog("ConnectToTAS: SetNamedPipeHandleState failed, err=%d", GetLastError());
+    }
+
+    SendIPC(L"REGISTER:%ls:%d", g_target.c_str(), GetCurrentProcessId());
+    CreateThread(NULL, 0, IPCRecvThread, NULL, 0, NULL);
+    return 0;
+}
+
+void ConnectToTAS() {
+    CreateThread(NULL, 0, ConnectToTASThread, NULL, 0, NULL);
+}
+
+// =====================================================================
 // Hook implementations
 // =====================================================================
 
@@ -396,7 +703,15 @@ HRESULT WINAPI h_CreateFile2(LPCWSTR a, DWORD b, DWORD c, DWORD d, LPCREATEFILE2
 
 HANDLE WINAPI h_CreateNamedPipeW(LPCWSTR a, DWORD b, DWORD c, DWORD d, DWORD e, DWORD f, DWORD g, LPSECURITY_ATTRIBUTES h) {
 	PathBuf p(a);
-	return RawCreateNamedPipeW(o_CreateNamedPipeW, p.ptr, b, c, d, e, f, g, h);
+	DebugLog("CreateNamedPipeW: %ls -> %ls (enabled=%d)", a, p.ptr, g_enabled ? 1 : 0);
+	HANDLE result = RawCreateNamedPipeW(o_CreateNamedPipeW, p.ptr, b, c, d, e, f, g, h);
+	DebugLog("CreateNamedPipeW: result=%p, err=%d", result, result == INVALID_HANDLE_VALUE ? GetLastError() : 0);
+
+	if (g_enabled && result != INVALID_HANDLE_VALUE) {
+		TryCreateOriginalPipe(a, b, c, d, e, f, g, h);
+	}
+
+	return result;
 }
 
 BOOL WINAPI h_Shell_NotifyIconW(DWORD dwMessage, PNOTIFYICONDATAW lpData) {
@@ -712,9 +1027,23 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
 		DebugLog("DllMain: DLL_PROCESS_ATTACH");
 		LoadConfig();
 		InstallAllHooks();
+		if (g_enabled) {
+			ConnectToTAS();
+		}
 		DebugLog("DllMain: initialization complete");
 	} else if (reason == DLL_PROCESS_DETACH) {
 		DebugLog("DllMain: DLL_PROCESS_DETACH");
+		if (g_is_listener.load()) {
+			ReleaseListenerMutex();
+			g_is_listener.store(false);
+			DebugLog("DllMain: listener mutex released");
+		}
+		if (g_ipc_pipe != INVALID_HANDLE_VALUE) {
+			SendIPC(L"BYE:%d", GetCurrentProcessId());
+			std::lock_guard<std::mutex> lock(g_ipcMutex);
+			CloseHandle(g_ipc_pipe);
+			g_ipc_pipe = INVALID_HANDLE_VALUE;
+		}
 		MH_Uninitialize();
 		if (g_logFile) {
 			fclose(g_logFile);

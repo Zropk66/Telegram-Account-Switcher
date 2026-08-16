@@ -1,9 +1,10 @@
 """通用工具函数."""
 
+import sys
 from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
-from typing import Generator, Optional
+from typing import Generator, List, Optional
 
 from src.core.constants import TAG_FILE
 from src.core.logger import Logger
@@ -65,3 +66,19 @@ def format_timedelta(delta: timedelta) -> str:
     minutes = (total_seconds % 3600) // 60
     seconds = total_seconds % 60
     return f"{hours}时{minutes}分{seconds}秒"
+
+
+def extract_tg_url(args: Optional[List[str]] = None) -> Optional[str]:
+    """从命令行参数中提取 tg:// URL。"""
+    if args is None:
+        args = sys.argv[1:]
+    for arg in args:
+        stripped = arg.strip().strip('"').strip("'")
+        if stripped.lower().startswith("tg://"):
+            end = len(stripped)
+            for i in range(5, len(stripped)):
+                if stripped[i] in (";", "\r", "\n"):
+                    end = i
+                    break
+            return stripped[:end]
+    return None

@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
 ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)
-![Version](https://img.shields.io/badge/Latest-v2.1.0-brightgreen)
+![Version](https://img.shields.io/badge/Latest-v2.2.0-brightgreen)
 ![License](https://img.shields.io/github/license/Zropk66/Telegram-Account-Switcher)
 
 一个用于在 Windows 上快速高效切换和管理多个 Telegram 账户的工具。支持符号链接（Symlink）与 Hook 注入两种启动模式，兼具安全性与高效体验。

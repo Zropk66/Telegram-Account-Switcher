@@ -186,12 +186,13 @@ class AccountMonitor:
                         if self.config.launch_mode != LaunchMode.HOOK:
                             self.logger.debug("正在恢复默认账户状态...")
                             restore_default()
+                            self.config.sync_all_account_paths()
                     break
         except Exception as e:
             self.logger.exception("监控线程发生未捕获异常", e)
         finally:
             tag_label = self.tag or self.config.default or "默认"
-            self.logger.debug(f"[{tag_label}] 正在清理资源...")
+            self.logger.info(f"[{tag_label}] 正在清理资源...")
             obs = self._observer
             self._observer = None
             if obs:
@@ -200,7 +201,6 @@ class AccountMonitor:
                 except Exception:
                     import traceback
                     traceback.print_exc()
-            self.config.sync_all_account_paths()
             for cb in list(self._completion_callbacks):
                 try:
                     cb(True, "会话已正常结束")

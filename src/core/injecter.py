@@ -100,7 +100,86 @@ kernel32.ResumeThread.restype = wintypes.DWORD
 kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
 kernel32.CloseHandle.restype = wintypes.BOOL
 
+kernel32.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+kernel32.TerminateProcess.restype = wintypes.BOOL
+
 kernel32.GetLastError.restype = wintypes.DWORD
+
+
+class IO_COUNTERS(ctypes.Structure):
+    _fields_ = [
+        ("ReadOperationCount", ctypes.c_ulonglong),
+        ("WriteOperationCount", ctypes.c_ulonglong),
+        ("OtherOperationCount", ctypes.c_ulonglong),
+        ("ReadTransferCount", ctypes.c_ulonglong),
+        ("WriteTransferCount", ctypes.c_ulonglong),
+        ("OtherTransferCount", ctypes.c_ulonglong),
+    ]
+
+
+class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
+    _fields_ = [
+        ("PerProcessUserTimeLimit", wintypes.LARGE_INTEGER),
+        ("PerJobUserTimeLimit", wintypes.LARGE_INTEGER),
+        ("LimitFlags", wintypes.DWORD),
+        ("MinimumWorkingSetSize", ctypes.c_size_t),
+        ("MaximumWorkingSetSize", ctypes.c_size_t),
+        ("ActiveProcessLimit", wintypes.DWORD),
+        ("Affinity", ctypes.c_void_p),
+        ("PriorityClass", wintypes.DWORD),
+        ("SchedulingClass", wintypes.DWORD),
+    ]
+
+
+class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
+    _fields_ = [
+        ("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION),
+        ("IoInfo", IO_COUNTERS),
+        ("ProcessMemoryLimit", ctypes.c_size_t),
+        ("JobMemoryLimit", ctypes.c_size_t),
+        ("PeakProcessMemoryUsed", ctypes.c_size_t),
+        ("PeakJobMemoryUsed", ctypes.c_size_t),
+    ]
+
+
+JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+JobObjectExtendedLimitInformation = 9
+
+kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+
+kernel32.SetInformationJobObject.argtypes = [
+    wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD,
+]
+kernel32.SetInformationJobObject.restype = wintypes.BOOL
+
+kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+
+_job_handle: int | None = None
+
+
+def _assign_to_job(h_process: int, logger: Logger) -> None:
+    """将进程分配到 Job Object."""
+    global _job_handle
+    if _job_handle is None:
+        _job_handle = kernel32.CreateJobObjectW(None, None)
+        if not _job_handle:
+            logger.debug(f"CreateJobObjectW 失败: {kernel32.GetLastError()}")
+            return
+        info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not kernel32.SetInformationJobObject(
+                _job_handle, JobObjectExtendedLimitInformation,
+                ctypes.byref(info), ctypes.sizeof(info),
+        ):
+            logger.debug(f"SetInformationJobObject 失败: {kernel32.GetLastError()}")
+            _job_handle = None
+            return
+        logger.debug(f"Job Object 已创建: handle=0x{_job_handle:016X}")
+
+    if not kernel32.AssignProcessToJobObject(_job_handle, h_process):
+        logger.debug(f"AssignProcessToJobObject 失败: {kernel32.GetLastError()}")
 
 
 def get_loadlibrary_address() -> int:
@@ -127,7 +206,7 @@ def inject_dll(h_process: int, dll_path: str, logger: Logger) -> bool:
     """向目标进程注入 DLL."""
     dll_path_abs = os.path.abspath(dll_path)
     if not os.path.isfile(dll_path_abs):
-        raise FileNotFoundError(f"DLL not found: {dll_path_abs}")
+        raise FileNotFoundError(f"DLL 未找到: {dll_path_abs}")
 
     dll_path_w = dll_path_abs.replace("/", "\\")
     dll_bytes = dll_path_w.encode("utf-16-le") + b"\x00\x00"
@@ -139,26 +218,21 @@ def inject_dll(h_process: int, dll_path: str, logger: Logger) -> bool:
     )
     if not remote_mem:
         raise OSError(f"VirtualAllocEx failed: {kernel32.GetLastError()}")
-    logger.debug(f"远程内存地址: 0x{remote_mem:016X}")
 
     written = ctypes.c_size_t(0)
     if not kernel32.WriteProcessMemory(h_process, remote_mem, dll_bytes, alloc_size, ctypes.byref(written)):
         raise OSError(f"WriteProcessMemory failed: {kernel32.GetLastError()}")
-    logger.debug(f"已写入 {written.value} 字节 (DLL 路径)")
 
     load_lib = get_loadlibrary_address()
-    logger.debug(f"LoadLibraryW @ 0x{load_lib:016X}")
 
     thread_id = wintypes.DWORD(0)
-    logger.debug("创建远程线程 (LoadLibraryW)...")
     h_thread = kernel32.CreateRemoteThread(
         h_process, None, 0, load_lib, remote_mem, 0, ctypes.byref(thread_id)
     )
     if not h_thread:
         raise OSError(f"CreateRemoteThread failed: {kernel32.GetLastError()}")
-    logger.debug(f"远程线程已创建 (TID={thread_id.value})")
+    logger.debug(f"远程线程已创建: TID={thread_id.value}, LoadLibraryW=0x{load_lib:016X}")
 
-    logger.debug("等待 LoadLibraryW 执行完成...")
     result = kernel32.WaitForSingleObject(h_thread, 10000)
     if result == 0xFFFFFFFF or result == WAIT_TIMEOUT:
         kernel32.CloseHandle(h_thread)
@@ -169,25 +243,24 @@ def inject_dll(h_process: int, dll_path: str, logger: Logger) -> bool:
 
     kernel32.CloseHandle(h_thread)
     kernel32.VirtualFreeEx(h_process, remote_mem, 0, MEM_RELEASE)
-    logger.debug("远程内存已释放")
 
     if exit_code.value == 0:
         raise OSError("LoadLibraryW returned NULL (DLL load failed in target process)")
 
-    logger.debug(f"LoadLibraryW 返回模块句柄 0x{exit_code.value:016X}")
+    logger.debug(f"DLL 注入成功, 模块句柄: 0x{exit_code.value:016X}")
     return True
 
 
 def launch_with_hook(
-    telegram_path: str,
-    dll_path: str,
-    logger: Logger,
-    tdata_name: str | None = None,
-    tray_name: str | None = None,
-    isolate_appid: bool = False,
-    workdir: str | None = None,
-    extra_args: str = "",
-    no_suspend: bool = False,
+        telegram_path: str,
+        dll_path: str,
+        logger: Logger,
+        tdata_name: str | None = None,
+        tray_name: str | None = None,
+        isolate_appid: bool = False,
+        workdir: str | None = None,
+        extra_args: str = "",
+        no_suspend: bool = False,
 ) -> int | None:
     """启动 Telegram 并注入 DLL."""
     telegram_path = os.path.abspath(telegram_path)
@@ -199,13 +272,6 @@ def launch_with_hook(
     if not os.path.isfile(dll_path):
         logger.error(f"找不到 DLL: {dll_path}")
         return None
-
-    logger.debug(f"Telegram : {telegram_path}")
-    logger.debug(f"DLL      : {dll_path}")
-    if tdata_name:
-        logger.debug(f"tdata名  : {tdata_name}")
-    if tray_name:
-        logger.debug(f"tray名   : {tray_name}")
 
     env = dict(os.environ)
     if tdata_name:
@@ -220,7 +286,10 @@ def launch_with_hook(
         workdir_abs = os.path.abspath(workdir)
         cmd_line += f' -workdir "{workdir_abs}"'
     if extra_args:
-        cmd_line += f" {extra_args}"
+        if extra_args.startswith("tg://") or extra_args.startswith("http"):
+            cmd_line += f' "{extra_args}"'
+        else:
+            cmd_line += f" {extra_args}"
 
     creation_flags = CREATE_UNICODE_ENVIRONMENT | CREATE_NEW_CONSOLE
     if not no_suspend:
@@ -234,8 +303,7 @@ def launch_with_hook(
 
     env_block = write_environment_block(env)
 
-    logger.debug(f"启动命令行: {cmd_line}")
-    logger.debug(f"挂起模式  : {'否' if no_suspend else '是'}")
+    logger.debug(f"启动命令行: {cmd_line} (挂起={'否' if no_suspend else '是'})")
 
     workdir_for_process = os.path.dirname(telegram_path)
 
@@ -252,20 +320,20 @@ def launch_with_hook(
 
     logger.info(f"进程已创建 PID={pi.dwProcessId}")
 
+    _assign_to_job(pi.hProcess, logger)
+
     if not no_suspend:
         try:
-            logger.debug("进程处于挂起状态，开始注入...")
             inject_dll(pi.hProcess, dll_path, logger)
-            logger.info("DLL 注入成功")
+            logger.info("hook 注入成功")
         except Exception as e:
             logger.error(f"注入失败: {e}")
             logger.debug("终止挂起的进程...")
-            kernel32.ResumeThread(pi.hThread)
+            kernel32.TerminateProcess(pi.hProcess, 1)
             kernel32.CloseHandle(pi.hThread)
             kernel32.CloseHandle(pi.hProcess)
             return None
 
-        logger.debug("恢复主线程执行...")
         prev = kernel32.ResumeThread(pi.hThread)
         logger.debug(f"主线程已恢复 (prev suspend count={prev})")
     else:
@@ -273,16 +341,12 @@ def launch_with_hook(
         time.sleep(0.3)
         try:
             inject_dll(pi.hProcess, dll_path, logger)
-            logger.info("DLL 注入成功")
+            logger.info("hook 注入成功")
         except Exception as e:
             logger.error(f"注入失败: {e}")
             kernel32.CloseHandle(pi.hThread)
             kernel32.CloseHandle(pi.hProcess)
             return None
-
-    logger.info(f"Telegram 已启动 (PID={pi.dwProcessId})")
-    if tdata_name:
-        logger.info(f"已将 tdata 重定向为: {tdata_name}")
 
     kernel32.CloseHandle(pi.hThread)
     kernel32.CloseHandle(pi.hProcess)

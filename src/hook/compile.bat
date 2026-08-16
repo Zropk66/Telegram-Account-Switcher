@@ -27,3 +27,4 @@ if errorlevel 1 (
 )
 echo [OK] hook.dll (MinHook) built successfully.
 endlocal
+pause
